@@ -1,31 +1,32 @@
 # Frontend - Seguimiento de Vagonetas
 
 ## Descripción
-Interfaz web en React para subir imágenes de vagonetas y consultar el historial de registros procesados.
+Interfaz web en React para registrar, consultar y visualizar el historial y la trayectoria de vagonetas en una fábrica de ladrillos.
 
-## Instalación rápida (para desarrollo)
+## Instalación rápida
 
 ### Requisitos previos
 - Node.js 16+
-- npm (incluido con Node.js)
+- npm
 - Git
 
 ### 1. Clona el repositorio
-```powershell
-git clone <URL_DEL_REPOSITORIO>
-cd app_imagenes/frontend
+```bash
+# Clona el repositorio y entra al frontend
+ git clone <URL_DEL_REPOSITORIO>
+ cd ElDorado/frontend
 ```
 
 ### 2. Instala las dependencias
-```powershell
+```bash
 npm install
 ```
 
 ### 3. Configura la URL del backend (opcional)
-Por defecto, el frontend espera que el backend esté en http://localhost:8000. Si usas otro puerto o dominio, edita la URL en los componentes React (`src/components/Upload.js`, `Historial.js`, `Trayectoria.js`).
+Por defecto, el frontend espera el backend en http://localhost:8000. Si usas otro puerto o dominio, edita la URL en los componentes React (`src/components/Upload.js`, `Historial.js`, `Trayectoria.js`).
 
 ### 4. Inicia la aplicación
-```powershell
+```bash
 npm start
 ```
 
@@ -39,6 +40,7 @@ La app se abrirá en tu navegador en http://localhost:3000
 - `Upload` — Formulario para subir imágenes
 - `Historial` — Tabla para visualizar y filtrar registros
 - `Trayectoria` — Consulta la trayectoria de una vagoneta específica
+- `CameraCapture` — Captura de imágenes en tiempo real desde cámara web
 
 ## Notas
 - El frontend espera que el backend esté corriendo en http://localhost:8000

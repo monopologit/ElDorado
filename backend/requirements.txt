@@ -3,4 +3,4 @@ uvicorn[standard]
 motor
 pymongo
 python-dotenv
-opencv-python ultralytics
+opencv-python

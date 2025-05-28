@@ -63,10 +63,14 @@ async def upload_image(
     with save_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     # Procesa la imagen con YOLOv8 y OCR para detectar el número de vagoneta
-    cropped_placa_img, bbox_vagoneta, bbox_placa = detectar_vagoneta_y_placa(str(save_path))
-    numero_detectado = None
-    if cropped_placa_img is not None:
-        numero_detectado = ocr_placa_img(cropped_placa_img)
+    cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado = detectar_vagoneta_y_placa(str(save_path))
+    if not numero_detectado:
+        # Eliminar la imagen si no hay número detectado
+        try:
+            os.remove(save_path)
+        except Exception:
+            pass
+        return JSONResponse({"message": "No se detectó vagoneta con número. Imagen ignorada.", "numero_detectado": None}, status_code=200)
     # Guarda los metadatos en MongoDB
     vagoneta = schemas.VagonetaCreate(
         numero=numero_detectado,
@@ -105,10 +109,14 @@ async def upload_images(
             with save_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             # Procesa la imagen con YOLOv8 y OCR
-            cropped_placa_img, bbox_vagoneta, bbox_placa = detectar_vagoneta_y_placa(str(save_path))
-            numero_detectado = None
-            if cropped_placa_img is not None:
-                numero_detectado = ocr_placa_img(cropped_placa_img)
+            cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado = detectar_vagoneta_y_placa(str(save_path))
+            if not numero_detectado:
+                try:
+                    os.remove(save_path)
+                except Exception:
+                    pass
+                results.append({"filename": file.filename, "status": "ignored", "numero_detectado": None, "message": "No se detectó vagoneta con número"})
+                continue
             vagoneta = schemas.VagonetaCreate(
                 numero=numero_detectado,
                 imagen_path=f"uploads/{save_path.name}",
