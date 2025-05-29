@@ -1,14 +1,26 @@
 import React, { useState } from "react";
 import axios from "axios";
+import Spinner from "./Spinner";
+
+const Feedback = ({ status, message }) => {
+  if (!status) return null;
+  let color = "text-cyan-700";
+  if (status === "ok") color = "text-green-600";
+  if (status === "error") color = "text-red-600";
+  if (status === "ignored") color = "text-yellow-600";
+  return (
+    <div className={`font-bold text-center mt-2 ${color}`}>{message}</div>
+  );
+};
 
 const Upload = () => {
   const [files, setFiles] = useState([]);
-  const [message, setMessage] = useState("");
+  const [feedback, setFeedback] = useState(null);
   const [progress, setProgress] = useState(null);
   const [evento, setEvento] = useState("ingreso");
   const [tunel, setTunel] = useState("");
-  const [modeloLadrillo, setModeloLadrillo] = useState("");
   const [merma, setMerma] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
     setFiles(Array.from(e.target.files));
@@ -17,12 +29,12 @@ const Upload = () => {
   const handleUpload = async (e) => {
     e.preventDefault();
     if (!files.length) return;
+    setLoading(true);
     setProgress({ current: 0, total: files.length });
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
     formData.append("evento", evento);
     formData.append("tunel", tunel);
-    formData.append("modelo_ladrillo", modeloLadrillo);
     formData.append("merma", merma);
     try {
       const res = await axios.post(
@@ -43,18 +55,21 @@ const Upload = () => {
         }
       );
       const ok = res.data.results.filter((r) => r.status === "ok").length;
-      const ignored = res.data.results.filter((r) => r.status === "ignored")
-        .length;
+      const ignored = res.data.results.filter((r) => r.status === "ignored").length;
       const fail = res.data.results.filter((r) => r.status === "error").length;
       let msg = `Subidas exitosas: ${ok}`;
       if (ignored > 0) msg += `, ignoradas (sin vagoneta): ${ignored}`;
       if (fail > 0) msg += `, fallidas: ${fail}`;
-      setMessage(msg);
+      setFeedback({
+        status: fail > 0 ? "error" : ignored > 0 ? "ignored" : "ok",
+        message: msg,
+      });
     } catch (err) {
-      setMessage("Error al subir las imágenes");
+      setFeedback({ status: "error", message: "Error al subir las imágenes" });
     }
     setFiles([]);
     setProgress(null);
+    setLoading(false);
   };
 
   return (
@@ -89,13 +104,6 @@ const Upload = () => {
           className="px-3 py-2 border border-cyan-300 rounded-lg bg-white text-cyan-900 font-medium placeholder-cyan-400 focus:outline-none focus:ring-2 focus:ring-orange-400 md:w-40"
         />
         <input
-          type="text"
-          placeholder="Modelo de ladrillo (opcional)"
-          value={modeloLadrillo}
-          onChange={(e) => setModeloLadrillo(e.target.value)}
-          className="px-3 py-2 border border-cyan-300 rounded-lg bg-white text-cyan-900 font-medium placeholder-cyan-400 focus:outline-none focus:ring-2 focus:ring-orange-400 md:w-48"
-        />
-        <input
           type="number"
           min="0"
           max="100"
@@ -107,10 +115,10 @@ const Upload = () => {
         />
         <button
           type="submit"
-          disabled={!files.length}
+          disabled={!files.length || loading}
           className="py-2 px-6 w-full md:w-auto bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg transition disabled:bg-cyan-300 disabled:cursor-not-allowed tracking-wider text-lg mx-auto border border-orange-500"
         >
-          Subir
+          {loading ? <Spinner size={22} /> : "Subir"}
         </button>
       </form>
       {progress && (
@@ -118,17 +126,7 @@ const Upload = () => {
           Subiendo {progress.current} de {progress.total}...
         </p>
       )}
-      {message && (
-        <p
-          className={`text-center font-bold mt-2 ${
-            message.includes("fallidas")
-              ? "text-red-600 animate-bounce"
-              : "text-green-700 animate-pulse"
-          }`}
-        >
-          {message}
-        </p>
-      )}
+      <Feedback status={feedback?.status} message={feedback?.message} />
       {files.length > 0 && (
         <div className="flex flex-wrap gap-3 justify-center mt-4">
           {files.map((file, idx) => (

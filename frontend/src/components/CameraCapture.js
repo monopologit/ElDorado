@@ -1,6 +1,18 @@
 import React, { useRef, useEffect, useState } from "react";
+import Spinner from "./Spinner";
 
-const CameraPanel = ({ label, evento, onCapture, loading }) => {
+const Feedback = ({ status, message }) => {
+  if (!status) return null;
+  let color = "text-cyan-700";
+  if (status === "ok") color = "text-green-600";
+  if (status === "error") color = "text-red-600";
+  if (status === "ignored") color = "text-yellow-600";
+  return (
+    <div className={`font-bold text-center mt-2 ${color}`}>{message}</div>
+  );
+};
+
+const CameraPanel = ({ label, evento, onCapture, loading, feedback, ultimos }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [error, setError] = useState(null);
@@ -83,17 +95,33 @@ const CameraPanel = ({ label, evento, onCapture, loading }) => {
         <canvas ref={canvasRef} style={{ display: "none" }} />
       </div>
       <button className="w-full py-2 px-4 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition disabled:bg-cyan-300 disabled:cursor-not-allowed tracking-wider text-lg" onClick={handleCapture} disabled={loading}>
-        {loading ? "Procesando..." : `Capturar Frame (${label})`}
+        {loading ? <Spinner size={22} /> : `Capturar Frame (${label})`}
       </button>
+      <Feedback status={feedback?.status} message={feedback?.message} />
+      {ultimos && ultimos.length > 0 && (
+        <div className="w-full mt-4">
+          <div className="text-cyan-700 font-semibold mb-2 text-sm">Últimos registros:</div>
+          <div className="flex gap-2 flex-wrap">
+            {ultimos.map((r, idx) => (
+              <div key={idx} className="border border-cyan-200 rounded-lg p-2 bg-cyan-50 flex flex-col items-center w-24">
+                <img src={`http://localhost:8000/${r.imagen_path}`} alt="mini" className="w-16 h-16 object-cover rounded mb-1" />
+                <div className="text-xs text-cyan-900 font-bold">{r.numero || "-"}</div>
+                <div className="text-[10px] text-cyan-600">{r.tunel || "-"}</div>
+                <div className="text-[10px] text-cyan-600">{new Date(r.timestamp).toLocaleTimeString()}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const CameraCapture = ({ onCapture, loading }) => {
+const CameraCapture = ({ onCapture, loading, feedbacks, ultimosIngreso, ultimosEgreso }) => {
   return (
     <div className="w-full flex flex-col md:flex-row md:items-start md:justify-center gap-8 py-6 px-2 md:px-0 bg-cyan-50 min-h-screen">
-      <CameraPanel label="Ingreso" evento="ingreso" onCapture={onCapture} loading={loading} />
-      <CameraPanel label="Egreso" evento="egreso" onCapture={onCapture} loading={loading} />
+      <CameraPanel label="Ingreso" evento="ingreso" onCapture={onCapture} loading={loading.ingreso} feedback={feedbacks.ingreso} ultimos={ultimosIngreso} />
+      <CameraPanel label="Egreso" evento="egreso" onCapture={onCapture} loading={loading.egreso} feedback={feedbacks.egreso} ultimos={ultimosEgreso} />
     </div>
   );
 };

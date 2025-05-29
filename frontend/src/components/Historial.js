@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import Spinner from "./Spinner";
 
 const Historial = () => {
   const [registros, setRegistros] = useState([]);
@@ -55,7 +56,7 @@ const Historial = () => {
         </div>
       </form>
       {loading ? (
-        <p style={{ textAlign: "center" }}>Cargando...</p>
+        <div className="flex justify-center items-center py-8"><Spinner size={32} /></div>
       ) : (
         <div className="w-full overflow-x-auto">
           <table className="min-w-full bg-white border border-cyan-200 rounded-xl shadow text-cyan-900 text-base">
@@ -80,7 +81,7 @@ const Historial = () => {
                   <td className="px-4 py-2 border-b">{r.merma !== undefined && r.merma !== null ? `${r.merma}%` : "-"}</td>
                   <td className="px-4 py-2 border-b">{new Date(r.timestamp).toLocaleString()}</td>
                   <td className="px-4 py-2 border-b">
-                    <img src={`http://localhost:8000/${r.imagen_path}`} alt="vagoneta" width={80} />
+                    <img src={`http://localhost:8000/${r.imagen_path}`} alt="vagoneta" width={80} className="rounded shadow border border-cyan-100" />
                   </td>
                 </tr>
               ))}
