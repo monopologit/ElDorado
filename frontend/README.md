@@ -3,6 +3,9 @@
 ## Descripción
 Interfaz web en React para registrar, consultar y visualizar el historial y la trayectoria de vagonetas en una fábrica de ladrillos.
 
+## ¿Qué hace?
+Permite visualizar, capturar y registrar automáticamente el movimiento de vagonetas en la fábrica usando cámaras físicas y visión computacional.
+
 ## Instalación rápida
 
 ### Requisitos previos
@@ -32,22 +35,22 @@ npm start
 
 La app se abrirá en tu navegador en http://localhost:3000
 
-## ¿Cómo probar?
-- Sube imágenes de vagonetas usando el formulario.
-- Consulta el historial y la trayectoria desde la interfaz.
-
-## Componentes principales
-- `Upload` — Formulario para subir imágenes
-- `Historial` — Tabla para visualizar y filtrar registros
-- `Trayectoria` — Consulta la trayectoria de una vagoneta específica
+## Funcionalidades principales
+- **Cámara Tiempo Real:** Captura automática desde cámaras físicas. Es el flujo principal y recomendado.
+- **Subir Imagen:** Permite cargar imágenes manualmente (solo para pruebas o casos excepcionales).
+- **Historial:** Consulta de registros de vagonetas detectadas.
+- **Trayectoria:** Visualiza el recorrido de una vagoneta específica
 - `CameraCapture` — Captura de imágenes en tiempo real desde cámara web
 
-## Notas
-- El frontend espera que el backend esté corriendo en http://localhost:8000
-- Puedes cambiar la URL en los componentes si usas otro puerto o dominio.
+## Notas importantes
+- El sistema está diseñado para funcionar de forma automática con cámaras físicas. La carga manual es solo un complemento para pruebas.
+- El backend debe estar corriendo y tener el modelo YOLOv8 entrenado en `backend/models/yolov8_vagonetas.pt`.
 
-## Cambios recientes (Mayo 2025)
+## Personalización
+- Puedes modificar los estilos en `src/App.css` y los componentes en `src/components/`.
+- El logo y colores pueden adaptarse a la identidad de tu empresa.
 
-- El sistema ahora informa al usuario cuántas imágenes fueron ignoradas por no detectar vagoneta al subir varias imágenes.
-- El mensaje de resultado en el formulario de subida muestra claramente cuántas imágenes fueron exitosas, ignoradas (sin vagoneta) y fallidas.
-- Mejor integración con la lógica inteligente del backend para evitar almacenar imágenes irrelevantes.
+## Requisitos
+- Node.js 16+
+- Acceso al backend corriendo en http://localhost:8000
+

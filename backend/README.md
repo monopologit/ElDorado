@@ -67,6 +67,7 @@ El backend estará disponible en http://localhost:8000
 - Ahora **solo se guarda la imagen y los datos si se detecta un número de vagoneta** en la imagen subida. Si no se detecta, la imagen se elimina automáticamente y se informa al usuario.
 - El endpoint `/upload-multiple/` devuelve un listado indicando cuáles imágenes fueron ignoradas (`status: "ignored"`) y el motivo.
 - El frontend muestra mensajes claros sobre imágenes exitosas, ignoradas y fallidas.
+- **El flujo principal es la captura automática desde cámaras físicas.** La carga manual de imágenes es solo para pruebas o casos excepcionales.
 
 ## Notas
 - El modelo YOLOv8 debe estar entrenado y ubicado en `backend/models/yolov8_vagonetas.pt`.
