@@ -84,6 +84,10 @@ async def upload_image(
             },
             status_code=200,
         )
+    # Detectar modelo de ladrillo automáticamente
+    from utils.image_processing import detectar_modelo_ladrillo
+
+    modelo_ladrillo = detectar_modelo_ladrillo(str(save_path))
     # Guarda los metadatos en MongoDB
     vagoneta = schemas.VagonetaCreate(
         numero=numero_detectado,
@@ -153,6 +157,9 @@ async def upload_images(
                     }
                 )
                 continue
+            # Detectar modelo de ladrillo automáticamente
+            from utils.image_processing import detectar_modelo_ladrillo
+            modelo_ladrillo = detectar_modelo_ladrillo(str(save_path))
             vagoneta = schemas.VagonetaCreate(
                 numero=numero_detectado,
                 imagen_path=f"uploads/{save_path.name}",

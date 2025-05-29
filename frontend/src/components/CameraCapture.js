@@ -5,14 +5,37 @@ const CameraPanel = ({ label, evento, onCapture, loading }) => {
   const canvasRef = useRef(null);
   const [error, setError] = useState(null);
   const [tunel, setTunel] = useState("");
-  const [modelo, setModelo] = useState("");
   const [merma, setMerma] = useState("");
+  const [devices, setDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
 
+  // Listar cámaras disponibles
   useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => { videoRef.current.srcObject = stream; })
-      .catch(() => setError("No se pudo acceder a la cámara"));
+    navigator.mediaDevices.enumerateDevices().then((all) => {
+      const videoDevices = all.filter((d) => d.kind === "videoinput");
+      setDevices(videoDevices);
+      if (videoDevices.length > 0) setSelectedDeviceId(videoDevices[0].deviceId);
+    });
   }, []);
+
+  // Cambiar stream al cambiar de cámara
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+    const constraints = { video: { deviceId: { exact: selectedDeviceId } } };
+    let localStream = null;
+    navigator.mediaDevices.getUserMedia(constraints)
+      .then((stream) => {
+        localStream = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+        setError(null);
+      })
+      .catch(() => setError("No se pudo acceder a la cámara seleccionada"));
+    return () => {
+      if (localStream) {
+        localStream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [selectedDeviceId]);
 
   const handleCapture = () => {
     const video = videoRef.current;
@@ -20,8 +43,8 @@ const CameraPanel = ({ label, evento, onCapture, loading }) => {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(blob => {
-      onCapture(blob, { evento, tunel, modelo_ladrillo: modelo, merma });
+    canvas.toBlob((blob) => {
+      onCapture(blob, { evento, tunel, merma }); // modelo_ladrillo eliminado, será detectado automáticamente
     }, "image/jpeg");
   };
 
@@ -30,15 +53,25 @@ const CameraPanel = ({ label, evento, onCapture, loading }) => {
       <h3 className="text-2xl font-extrabold text-orange-600 mb-4 tracking-wider uppercase">
         Cámara {label}
       </h3>
+      {devices.length > 1 && (
+        <div className="mb-3 w-full">
+          <label className="block text-cyan-700 font-semibold mb-1">Seleccionar cámara:</label>
+          <select
+            className="w-full px-3 py-2 border border-cyan-300 rounded-lg bg-cyan-50 text-cyan-900 font-medium"
+            value={selectedDeviceId}
+            onChange={e => setSelectedDeviceId(e.target.value)}
+          >
+            {devices.map((d, idx) => (
+              <option key={d.deviceId} value={d.deviceId}>{d.label || `Cámara ${idx + 1}`}</option>
+            ))}
+          </select>
+        </div>
+      )}
       {error && <div className="text-red-600 mb-2 text-center font-semibold animate-bounce">{error}</div>}
       <div className="w-full flex flex-col gap-4 mb-4">
         <label className="flex flex-col text-base font-semibold text-cyan-900 tracking-wide">
           <span className="mb-1 text-cyan-700 uppercase tracking-wider">Túnel</span>
           <input value={tunel} onChange={e => setTunel(e.target.value)} placeholder="Ej: Túnel 1" className="mt-1 px-3 py-2 border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 bg-cyan-50 placeholder-cyan-400 font-medium text-cyan-900" />
-        </label>
-        <label className="flex flex-col text-base font-semibold text-cyan-900 tracking-wide">
-          <span className="mb-1 text-cyan-700 uppercase tracking-wider">Modelo ladrillo</span>
-          <input value={modelo} onChange={e => setModelo(e.target.value)} placeholder="Opcional" className="mt-1 px-3 py-2 border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 bg-cyan-50 placeholder-cyan-400 font-medium text-cyan-900" />
         </label>
         <label className="flex flex-col text-base font-semibold text-cyan-900 tracking-wide">
           <span className="mb-1 text-cyan-700 uppercase tracking-wider">Merma (%)</span>

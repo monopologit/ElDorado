@@ -31,3 +31,28 @@ def detectar_vagoneta_y_placa(image_path):
         from .ocr import ocr_placa_img
         numero_detectado = ocr_placa_img(cropped_placa_img)
     return cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado
+
+# Suponiendo que tienes un modelo YOLOv8 entrenado para detectar modelos de ladrillo
+modelo_ladrillo_model_path = Path("models/yolov8_modelo_ladrillo.pt")
+modelo_ladrillo_model = None
+if modelo_ladrillo_model_path.exists():
+    modelo_ladrillo_model = YOLO(str(modelo_ladrillo_model_path))
+
+def detectar_modelo_ladrillo(image_path):
+    """
+    Detecta el modelo de ladrillo en la imagen usando un modelo YOLOv8 entrenado para eso.
+    Retorna el nombre/clase del modelo detectado o None si no se detecta.
+    """
+    if modelo_ladrillo_model is None:
+        return None
+    img = cv2.imread(str(image_path))
+    results = modelo_ladrillo_model(img)
+    # Suponiendo que la clase 0, 1, 2... corresponden a diferentes modelos
+    if len(results[0].boxes) > 0:
+        # Tomar la clase con mayor confianza
+        best = max(results[0].boxes, key=lambda b: b.conf[0])
+        clase = int(best.cls[0])
+        # Aquí deberías mapear la clase a un nombre de modelo
+        modelos = {0: "Hueco", 1: "Macizo", 2: "Otro"}
+        return modelos.get(clase, f"Modelo_{clase}")
+    return None
