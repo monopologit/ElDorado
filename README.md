@@ -166,3 +166,13 @@ Para instalar y ejecutar el sistema, sigue los pasos detallados en los archivos 
 **7. Documentación de hardware y recomendaciones de almacenamiento**
 - ⚠️ Se recomienda agregar una sección sobre cámaras, servidores y almacenamiento externo.
 
+---
+
+## Cambios recientes (Mayo 2025)
+
+- El backend ahora **solo guarda imágenes y registros cuando se detecta un número de vagoneta** en la imagen. Si no se detecta, la imagen se elimina automáticamente y no se almacena en la base de datos.
+- El endpoint `/upload-multiple/` informa en la respuesta cuántas imágenes fueron ignoradas por no contener vagoneta identificable (`status: "ignored"`).
+- El frontend muestra mensajes claros al usuario sobre imágenes exitosas, ignoradas y fallidas.
+
+---
+

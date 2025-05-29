@@ -45,3 +45,9 @@ La app se abrirá en tu navegador en http://localhost:3000
 ## Notas
 - El frontend espera que el backend esté corriendo en http://localhost:8000
 - Puedes cambiar la URL en los componentes si usas otro puerto o dominio.
+
+## Cambios recientes (Mayo 2025)
+
+- El sistema ahora informa al usuario cuántas imágenes fueron ignoradas por no detectar vagoneta al subir varias imágenes.
+- El mensaje de resultado en el formulario de subida muestra claramente cuántas imágenes fueron exitosas, ignoradas (sin vagoneta) y fallidas.
+- Mejor integración con la lógica inteligente del backend para evitar almacenar imágenes irrelevantes.

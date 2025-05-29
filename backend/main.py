@@ -40,13 +40,18 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # --- ENDPOINTS PRINCIPALES ---
 
-@app.post("/upload/", summary="Subir imagen de vagoneta", description="Sube una imagen, detecta el número de vagoneta y guarda los metadatos. Requiere campo 'evento' (ingreso/egreso) y opcional 'tunel', 'modelo_ladrillo', 'merma'.")
+
+@app.post(
+    "/upload/",
+    summary="Subir imagen de vagoneta",
+    description="Sube una imagen, detecta el número de vagoneta y guarda los metadatos. Requiere campo 'evento' (ingreso/egreso) y opcional 'tunel', 'modelo_ladrillo', 'merma'.",
+)
 async def upload_image(
     file: UploadFile = File(...),
     tunel: str = Form(None),
     evento: str = Form(...),
     modelo_ladrillo: str = Form(None),
-    merma: float = Form(None)
+    merma: float = Form(None),
 ):
     """
     Sube una imagen de vagoneta, la procesa con visión computacional y guarda los metadatos en MongoDB.
@@ -63,14 +68,22 @@ async def upload_image(
     with save_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     # Procesa la imagen con YOLOv8 y OCR para detectar el número de vagoneta
-    cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado = detectar_vagoneta_y_placa(str(save_path))
+    cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado = (
+        detectar_vagoneta_y_placa(str(save_path))
+    )
     if not numero_detectado:
         # Eliminar la imagen si no hay número detectado
         try:
             os.remove(save_path)
         except Exception:
             pass
-        return JSONResponse({"message": "No se detectó vagoneta con número. Imagen ignorada.", "numero_detectado": None}, status_code=200)
+        return JSONResponse(
+            {
+                "message": "No se detectó vagoneta con número. Imagen ignorada.",
+                "numero_detectado": None,
+            },
+            status_code=200,
+        )
     # Guarda los metadatos en MongoDB
     vagoneta = schemas.VagonetaCreate(
         numero=numero_detectado,
@@ -79,18 +92,32 @@ async def upload_image(
         tunel=tunel,
         evento=evento,
         modelo_ladrillo=modelo_ladrillo,
-        merma=merma
+        merma=merma,
     )
     await crud.create_vagoneta_record(vagoneta)
-    return JSONResponse({"message": "Imagen subida", "numero_detectado": numero_detectado, "evento": evento, "modelo_ladrillo": modelo_ladrillo, "merma": merma, "path": str(save_path)})
+    return JSONResponse(
+        {
+            "message": "Imagen subida",
+            "numero_detectado": numero_detectado,
+            "evento": evento,
+            "modelo_ladrillo": modelo_ladrillo,
+            "merma": merma,
+            "path": str(save_path),
+        }
+    )
 
-@app.post("/upload-multiple/", summary="Subir múltiples imágenes de vagonetas", description="Sube varias imágenes en una sola petición. Requiere campo 'evento' (ingreso/egreso) y opcional 'tunel', 'modelo_ladrillo', 'merma'.")
+
+@app.post(
+    "/upload-multiple/",
+    summary="Subir múltiples imágenes de vagonetas",
+    description="Sube varias imágenes en una sola petición. Requiere campo 'evento' (ingreso/egreso) y opcional 'tunel', 'modelo_ladrillo', 'merma'.",
+)
 async def upload_images(
     files: List[UploadFile] = File(...),
     tunel: str = Form(None),
     evento: str = Form(...),
     modelo_ladrillo: str = Form(None),
-    merma: float = Form(None)
+    merma: float = Form(None),
 ):
     """
     Sube varias imágenes de vagonetas, las procesa y guarda los metadatos en MongoDB.
@@ -109,13 +136,22 @@ async def upload_images(
             with save_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             # Procesa la imagen con YOLOv8 y OCR
-            cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado = detectar_vagoneta_y_placa(str(save_path))
+            cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado = (
+                detectar_vagoneta_y_placa(str(save_path))
+            )
             if not numero_detectado:
                 try:
                     os.remove(save_path)
                 except Exception:
                     pass
-                results.append({"filename": file.filename, "status": "ignored", "numero_detectado": None, "message": "No se detectó vagoneta con número"})
+                results.append(
+                    {
+                        "filename": file.filename,
+                        "status": "ignored",
+                        "numero_detectado": None,
+                        "message": "No se detectó vagoneta con número",
+                    }
+                )
                 continue
             vagoneta = schemas.VagonetaCreate(
                 numero=numero_detectado,
@@ -124,23 +160,49 @@ async def upload_images(
                 tunel=tunel,
                 evento=evento,
                 modelo_ladrillo=modelo_ladrillo,
-                merma=merma
+                merma=merma,
             )
             await crud.create_vagoneta_record(vagoneta)
-            results.append({"filename": file.filename, "status": "ok", "numero_detectado": numero_detectado, "evento": evento, "modelo_ladrillo": modelo_ladrillo, "merma": merma})
+            results.append(
+                {
+                    "filename": file.filename,
+                    "status": "ok",
+                    "numero_detectado": numero_detectado,
+                    "evento": evento,
+                    "modelo_ladrillo": modelo_ladrillo,
+                    "merma": merma,
+                }
+            )
         except Exception as e:
-            results.append({"filename": file.filename, "status": "error", "error": str(e)})
+            results.append(
+                {"filename": file.filename, "status": "error", "error": str(e)}
+            )
     return {"results": results}
 
-@app.get("/vagonetas/", response_model=list[schemas.VagonetaInDB], summary="Consultar historial de vagonetas", description="Consulta el historial de registros de vagonetas. Permite filtrar por número y fecha.")
-async def get_vagonetas(numero: str = Query(None, description="Número de vagoneta"), fecha: str = Query(None, description="Fecha en formato YYYY-MM-DD")):
+
+@app.get(
+    "/vagonetas/",
+    response_model=list[schemas.VagonetaInDB],
+    summary="Consultar historial de vagonetas",
+    description="Consulta el historial de registros de vagonetas. Permite filtrar por número y fecha.",
+)
+async def get_vagonetas(
+    numero: str = Query(None, description="Número de vagoneta"),
+    fecha: str = Query(None, description="Fecha en formato YYYY-MM-DD"),
+):
     """
     Devuelve el historial de registros de vagonetas, con opción de filtrar por número o fecha.
     """
     registros = await crud.get_vagonetas_historial(numero=numero, fecha=fecha)
     return registros
 
-@app.get("/trayectoria/{numero}", response_model=list[schemas.VagonetaInDB], summary="Trayectoria de una vagoneta", description="Devuelve todos los eventos (ingreso/egreso) de una vagoneta, ordenados por fecha.")
+
+@app.get(
+    "/trayectoria/{numero}",
+    response_model=list[schemas.VagonetaInDB],
+    summary="Trayectoria de una vagoneta",
+    description="Devuelve todos los eventos (ingreso/egreso) de una vagoneta, ordenados por fecha.",
+)
 async def trayectoria_vagoneta(numero: str):
     """
     Devuelve la trayectoria completa (ingresos y egresos) de una vagoneta, ordenada por fecha.
@@ -149,7 +211,12 @@ async def trayectoria_vagoneta(numero: str):
     registros.sort(key=lambda r: r["timestamp"])
     return registros
 
-@app.get("/health", summary="Healthcheck", description="Verifica que el backend está corriendo.")
+
+@app.get(
+    "/health",
+    summary="Healthcheck",
+    description="Verifica que el backend está corriendo.",
+)
 def health():
     """Endpoint de salud para monitoreo."""
     return {"status": "ok"}

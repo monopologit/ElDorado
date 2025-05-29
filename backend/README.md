@@ -62,6 +62,12 @@ El backend estará disponible en http://localhost:8000
 - **Tesseract OCR** — Reconocimiento óptico de caracteres
 - **React** — Interfaz web
 
+## Cambios recientes (Mayo 2025)
+
+- Ahora **solo se guarda la imagen y los datos si se detecta un número de vagoneta** en la imagen subida. Si no se detecta, la imagen se elimina automáticamente y se informa al usuario.
+- El endpoint `/upload-multiple/` devuelve un listado indicando cuáles imágenes fueron ignoradas (`status: "ignored"`) y el motivo.
+- El frontend muestra mensajes claros sobre imágenes exitosas, ignoradas y fallidas.
+
 ## Notas
 - El modelo YOLOv8 debe estar entrenado y ubicado en `backend/models/yolov8_vagonetas.pt`.
 - Puedes ajustar el procesamiento en `backend/utils/image_processing.py` y `ocr.py`.
