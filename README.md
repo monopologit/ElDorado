@@ -128,20 +128,27 @@ npm start
 - Integración con MongoDB para metadatos y almacenamiento externo para imágenes.
 - Futuro: integración con sistema de sensores de temperatura y humedad.
 
-## Tecnologías Utilizadas y Para Qué Sirve Cada Una
-- **FastAPI:** Framework moderno y eficiente para construir APIs REST en Python. Permite definir endpoints para subir imágenes, videos y consultar datos de vagonetas y ladrillos.
-- **Uvicorn:** Servidor ASGI rápido y ligero para ejecutar aplicaciones FastAPI en desarrollo y producción.
-- **MongoDB:** Base de datos NoSQL utilizada para almacenar los metadatos de los eventos (número de vagoneta, modelo de ladrillo, timestamps, etc.) y rutas de imágenes.
-- **PyMongo:** Conector de Python para interactuar con MongoDB desde el backend.
-- **OpenCV:** Librería de visión computacional para procesar imágenes y videos, detectar vagonetas y recortar regiones de interés.
-- **Ultralytics YOLOv8:** Modelo de deep learning para la detección automática de vagonetas y placas numeradas en imágenes y videos.
-- **Tesseract OCR:** Motor de reconocimiento óptico de caracteres para extraer el número de chapa de las vagonetas a partir de imágenes.
-- **React:** Biblioteca de JavaScript para construir la interfaz web interactiva y moderna del sistema.
-- **Axios:** Cliente HTTP para que el frontend se comunique con el backend y consuma los endpoints de la API.
-- **Tailwind CSS:** Framework de utilidades CSS para diseñar interfaces web responsivas y modernas de forma rápida.
-- **python-dotenv:** Permite manejar variables de entorno de forma flexible y segura en el backend.
-- **aiofiles:** Permite la manipulación asíncrona de archivos en el backend, útil para subir imágenes y videos.
-- **python-multipart:** Soporte para manejar formularios y archivos subidos vía HTTP en FastAPI.
+## Tecnologías Utilizadas y Dependencias
+
+### Backend (Python)
+- **fastapi**: Framework para construir APIs REST modernas y eficientes.
+- **aiofiles**: Manejo asíncrono de archivos, útil para subir imágenes y videos.
+- **python-dotenv**: Gestión de variables de entorno para configuración flexible.
+- **python-multipart**: Soporte para formularios y archivos subidos vía HTTP en FastAPI.
+- **pymongo**: Conector para interactuar con MongoDB desde Python.
+- **opencv-python**: Procesamiento y manipulación de imágenes y videos.
+- **ultralytics**: Implementación de modelos YOLO para detección automática de vagonetas y placas.
+- **pytesseract**: Reconocimiento óptico de caracteres (OCR) para extraer números de chapa.
+
+### Frontend (JavaScript/React)
+- **react**: Biblioteca principal para construir la interfaz web.
+- **react-dom**: Renderizado de componentes React en el DOM.
+- **react-scripts**: Scripts y utilidades para desarrollo y build de la app React.
+- **axios**: Cliente HTTP para comunicación frontend-backend.
+- **tailwindcss**: Framework de utilidades CSS para diseño moderno y responsivo.
+- **autoprefixer**: Añade automáticamente prefijos CSS para compatibilidad entre navegadores.
+- **postcss**: Herramienta para transformar CSS con plugins.
+- **@tailwindcss/postcss**: Integración de Tailwind con PostCSS.
 
 ## ¿Cómo Funciona la App?
 1. El usuario sube una o varias imágenes (o videos) de vagonetas desde la web.
