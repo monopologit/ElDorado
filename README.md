@@ -86,32 +86,49 @@ Desarrollar un sistema de visión computacional que permita identificar y trazar
    - Instala en la ruta por defecto (C:\Program Files\Tesseract-OCR)
 
 ### Instalación Rápida
-1. Clona o descarga este repositorio
-2. Abre PowerShell como administrador
-3. Navega hasta la carpeta del proyecto
-4. Ejecuta el script de configuración:
-```powershell
-.\setup-dev-no-docker.ps1
-```
 
-### Iniciar la Aplicación
-1. Inicia el backend (en una terminal):
-```powershell
-cd backend
-.\venv\Scripts\Activate
-uvicorn main:app --reload
-```
+1. Clona o descarga este repositorio desde GitHub.
+2. Abre una terminal (PowerShell o CMD) y navega hasta la carpeta del proyecto.
 
-2. Inicia el frontend (en otra terminal):
-```powershell
-cd frontend
-npm start
-```
+#### Backend (FastAPI + Python)
+1. Ve a la carpeta del backend:
+   ```powershell
+   cd backend
+   ```
+2. (Opcional pero recomendado) Crea y activa un entorno virtual:
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\Activate
+   ```
+3. Instala las dependencias:
+   ```powershell
+   pip install -r requirements.txt
+   ```
+4. Inicia el backend:
+   ```powershell
+   uvicorn main:app --reload
+   ```
+   El backend estará disponible en http://localhost:8000
 
-3. Accede a la aplicación:
-   - Frontend: http://localhost:3000
-   - API Backend: http://localhost:8000
-   - Documentación API: http://localhost:8000/docs
+#### Frontend (React)
+1. Abre otra terminal y navega a la carpeta del frontend:
+   ```powershell
+   cd frontend
+   ```
+2. Instala las dependencias:
+   ```powershell
+   npm install
+   ```
+3. Inicia el frontend:
+   ```powershell
+   npm start
+   ```
+   El frontend estará disponible en http://localhost:3000
+
+#### Acceso a la aplicación
+- Frontend: http://localhost:3000
+- API Backend: http://localhost:8000
+- Documentación interactiva de la API: http://localhost:8000/docs
 
 ## Estado Actual
 - Interfaz web y backend funcionales: permiten subir imágenes, registrar eventos, consultar historial y trayectoria de vagonetas.
