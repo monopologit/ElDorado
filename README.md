@@ -20,28 +20,42 @@ ElDorado/
 │   ├── main.py              # Punto de entrada FastAPI, define los endpoints principales
 │   ├── crud.py              # Funciones CRUD para la base de datos
 │   ├── database.py          # Configuración y conexión a MongoDB
-│   ├── schemas.py           # Modelos de datos (Pydantic)
+│   ├── schemas.py           # Modelos de datos
 │   ├── requirements.txt     # Dependencias Python necesarias
 │   ├── README.md            # Documentación específica del backend
-│   └── utils/               # Utilidades para procesamiento de imágenes
-│       ├── image_processing.py  # Detección de vagonetas y placas con YOLOv8
+│   └── utils/               # Utilidades para procesamiento de imágenes y video
+│       ├── camera_capture.py    # Captura y procesamiento de video/cámaras
+│       ├── image_processing.py  # Detección de vagonetas y placas, clasificación de ladrillos
 │       └── ocr.py               # Reconocimiento de caracteres (OCR) en placas
 │
 ├── frontend/                # Frontend: interfaz web en React
 │   ├── package.json         # Dependencias y scripts de React
+│   ├── postcss.config.js    # Configuración de PostCSS
+│   ├── tailwind.config.js   # Configuración de Tailwind CSS
 │   ├── README.md            # Documentación específica del frontend
 │   ├── public/              # Archivos públicos y estáticos
-│   │   ├── logo.jpg         # Logo de la empresa
+│   │   ├── favicon.ico      # Icono de la app
 │   │   ├── index.html       # HTML principal
-│   │   └── ...              # Otros recursos estáticos
+│   │   ├── logo.jpg         # Logo de la empresa
+│   │   ├── logo192.png      # Logo para PWA
+│   │   ├── logo512.png      # Logo para PWA
+│   │   ├── manifest.json    # Configuración de PWA
+│   │   ├── robots.txt       # Archivo robots.txt
+│   │   └── USUARIO.md       # Guía de usuario en markdown
 │   └── src/                 # Código fuente de React
 │       ├── App.js           # Componente principal de la app
 │       ├── App.css          # Estilos globales
 │       ├── index.js         # Punto de entrada de React
+│       ├── index.css        # Estilos base
 │       └── components/      # Componentes reutilizables
-│           ├── Upload.js        # Formulario para subir imágenes
-│           ├── Historial.js     # Tabla de historial de registros
-│           └── Trayectoria.js   # Consulta de trayectoria de vagonetas
+│           ├── CameraCapture.js     # Captura de imágenes desde cámara
+│           ├── CameraCapture.css    # Estilos de cámara
+│           ├── GuiaUsuario.js       # Guía de usuario integrada
+│           ├── Historial.js         # Tabla de historial de registros
+│           ├── Navbar.js            # Barra de navegación
+│           ├── Spinner.js           # Indicador de carga
+│           ├── Trayectoria.js       # Consulta de trayectoria de vagonetas
+│           └── Upload.js            # Formulario para subir imágenes
 ```
 
 ## Visión y Objetivo General
