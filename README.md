@@ -37,11 +37,11 @@ ElDorado/
 │   │   ├── favicon.ico      # Icono de la app
 │   │   ├── index.html       # HTML principal
 │   │   ├── logo.jpg         # Logo de la empresa
-│   │   ├── logo192.png      # Logo para PWA
-│   │   ├── logo512.png      # Logo para PWA
-│   │   ├── manifest.json    # Configuración de PWA
-│   │   ├── robots.txt       # Archivo robots.txt
-│   │   └── USUARIO.md       # Guía de usuario en markdown
+│   │   
+│   │   
+│   │   
+│   │   
+│   │   
 │   └── src/                 # Código fuente de React
 │       ├── App.js           # Componente principal de la app
 │       ├── App.css          # Estilos globales
@@ -128,12 +128,11 @@ Desarrollar un sistema de visión computacional que permita identificar y trazar
 #### Acceso a la aplicación
 - Frontend: http://localhost:3000
 - API Backend: http://localhost:8000
-- Documentación interactiva de la API: http://localhost:8000/docs
 
 ## Estado Actual
 - Interfaz web y backend funcionales: permiten subir imágenes, registrar eventos, consultar historial y trayectoria de vagonetas.
 - Procesamiento de imágenes con YOLOv8 y OCR para identificar vagonetas y registrar metadatos.
-- Estructura de base de datos y almacenamiento de imágenes implementados.
+- Estructura de base de datos y almacenamiento de imágenes a implementar.
 
 ## Mejoras Futuras / Pendientes
 - Integrar reconocimiento automático de modelo de ladrillo (visión computacional).
@@ -216,13 +215,10 @@ Desarrollar un sistema de visión computacional que permita identificar y trazar
 **5. Interfaz de usuario web**
 - ✔️ Frontend en React para subir imágenes, consultar historial y ver trayectoria.
 
-**6. API REST documentada**
-- ✔️ Endpoints REST documentados y accesibles desde `/docs`.
-
-**7. Registro de modelo de ladrillo y merma**
+**6. Registro de modelo de ladrillo y merma**
 - ✔️ Registro manual de modelo y merma al subir la imagen.
 
-**8. Escalabilidad y tecnologías recomendadas**
+**7. Escalabilidad y tecnologías recomendadas**
 - ✔️ Python (FastAPI) para backend, React para frontend y MongoDB como base de datos.
 
 ---
