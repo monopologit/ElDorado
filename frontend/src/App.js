@@ -5,6 +5,7 @@ import Historial from "./components/Historial";
 import Trayectoria from "./components/Trayectoria";
 import CameraCapture from "./components/CameraCapture";
 import Navbar from "./components/Navbar";
+import GuiaUsuario from "./components/GuiaUsuario";
 import "./App.css";
 
 const App = () => {
@@ -53,6 +54,7 @@ const App = () => {
         )}
         {view === "historial" && <Historial />}
         {view === "trayectoria" && <Trayectoria />}
+        {view === "guia" && <GuiaUsuario />}
       </main>
     </div>
   );

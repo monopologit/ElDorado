@@ -1,6 +1,8 @@
 fastapi
-uvicorn[standard]
-motor
-pymongo
+aiofiles
 python-dotenv
+python-multipart
+pymongo
 opencv-python
+ultralytics
+pytesseract

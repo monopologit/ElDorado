@@ -1,58 +1,101 @@
 import cv2
+import numpy as np
 from ultralytics import YOLO
-from pathlib import Path
+from .ocr import extract_number_from_image
+from typing import Dict, Optional, Any, Tuple
 
-# Cargar el modelo YOLOv8 (debe estar entrenado para vagonetas y placas numeradas)
-# Cambia el path al modelo según corresponda
-yolo_model_path = Path("models/yolov8_vagonetas.pt")
-model = YOLO(str(yolo_model_path))
+class ImageProcessor:
+    def __init__(self, model_path: str = "models/yolov8_vagonetas.pt"):
+        """Inicializa el procesador de imágenes con YOLOv8"""
+        self.model = YOLO(model_path)
+        self.last_detection = None
+        self.min_confidence = 0.5
 
-def detectar_vagoneta_y_placa(image_path):
-    """
-    Procesa la imagen y retorna la región de la placa numerada y la predicción de la vagoneta.
-    Retorna: (cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado)
-    Si no se detecta placa, numero_detectado será None.
-    """
-    img = cv2.imread(str(image_path))
-    results = model(img)
-    bbox_vagoneta = None
-    bbox_placa = None
-    numero_detectado = None
-    for r in results[0].boxes:
-        if int(r.cls[0]) == 0:
-            bbox_vagoneta = r.xyxy[0].cpu().numpy().astype(int)
-        elif int(r.cls[0]) == 1:
-            bbox_placa = r.xyxy[0].cpu().numpy().astype(int)
-    cropped_placa_img = None
-    if bbox_placa is not None:
-        x1, y1, x2, y2 = bbox_placa
-        cropped_placa_img = img[y1:y2, x1:x2]
-        # Intentar OCR solo si hay placa
-        from .ocr import ocr_placa_img
-        numero_detectado = ocr_placa_img(cropped_placa_img)
-    return cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado
+    def preprocess_image(self, image: np.ndarray) -> np.ndarray:
+        """Preprocesa la imagen para mejorar la detección"""
+        # Convertir a escala de grises
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # Mejorar contraste
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(gray)
+        # Volver a BGR para YOLO
+        return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
-# Suponiendo que tienes un modelo YOLOv8 entrenado para detectar modelos de ladrillo
-modelo_ladrillo_model_path = Path("models/yolov8_modelo_ladrillo.pt")
-modelo_ladrillo_model = None
-if modelo_ladrillo_model_path.exists():
-    modelo_ladrillo_model = YOLO(str(modelo_ladrillo_model_path))
+    def detect_objects(self, image: np.ndarray) -> Dict[str, Any]:
+        """Detecta vagoneta, placa y modelo de ladrillo en la imagen"""
+        # Preprocesar imagen
+        processed_image = self.preprocess_image(image)
+        
+        # Realizar detección con YOLOv8
+        results = self.model(processed_image)[0]
+        detections = {
+            'vagoneta': None,
+            'placa': None,
+            'ladrillo': None
+        }
 
-def detectar_modelo_ladrillo(image_path):
-    """
-    Detecta el modelo de ladrillo en la imagen usando un modelo YOLOv8 entrenado para eso.
-    Retorna el nombre/clase del modelo detectado o None si no se detecta.
-    """
-    if modelo_ladrillo_model is None:
-        return None
-    img = cv2.imread(str(image_path))
-    results = modelo_ladrillo_model(img)
-    # Suponiendo que la clase 0, 1, 2... corresponden a diferentes modelos
-    if len(results[0].boxes) > 0:
-        # Tomar la clase con mayor confianza
-        best = max(results[0].boxes, key=lambda b: b.conf[0])
-        clase = int(best.cls[0])
-        # Aquí deberías mapear la clase a un nombre de modelo
-        modelos = {0: "Hueco", 1: "Macizo", 2: "Otro"}
-        return modelos.get(clase, f"Modelo_{clase}")
-    return None
+        # Procesar resultados
+        for box in results.boxes:
+            confidence = float(box.conf[0])
+            if confidence < self.min_confidence:
+                continue
+
+            class_id = int(box.cls[0])
+            class_name = results.names[class_id]
+            bbox = box.xyxy[0].cpu().numpy()
+
+            if class_name == 'vagoneta':
+                detections['vagoneta'] = bbox
+            elif class_name == 'placa':
+                detections['placa'] = bbox
+            elif 'ladrillo' in class_name:
+                detections['ladrillo'] = {
+                    'bbox': bbox,
+                    'tipo': class_name
+                }
+
+        return detections
+
+    def process_frame(self, frame: np.ndarray) -> Optional[Dict[str, Any]]:
+        """Procesa un frame y retorna la información detectada"""
+        # Detectar objetos
+        detections = self.detect_objects(frame)
+        
+        if not detections['placa']:
+            return None
+
+        # Extraer y procesar número de placa
+        placa_bbox = detections['placa']
+        placa_image = frame[
+            int(placa_bbox[1]):int(placa_bbox[3]),
+            int(placa_bbox[0]):int(placa_bbox[2])
+        ]
+        numero = extract_number_from_image(placa_image)
+
+        if not numero:
+            return None
+
+        # Preparar resultado
+        result = {
+            'numero': numero,
+            'confidence': float(detections['placa'][4]) if len(detections['placa']) > 4 else 0.0,
+            'bbox': detections['placa'].tolist(),
+        }
+
+        # Agregar información del modelo de ladrillo si se detectó
+        if detections['ladrillo']:
+            result['modelo_ladrillo'] = detections['ladrillo']['tipo']
+
+        self.last_detection = result
+        return result
+
+    def get_last_detection(self) -> Optional[Dict[str, Any]]:
+        """Retorna la última detección exitosa"""
+        return self.last_detection
+
+# Inicializar el procesador como singleton
+processor = ImageProcessor()
+
+def process_image(image: np.ndarray) -> Optional[Dict[str, Any]]:
+    """Función auxiliar para procesar una imagen"""
+    return processor.process_frame(image)

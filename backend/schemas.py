@@ -1,24 +1,22 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, Any
 from datetime import datetime
 
 class VagonetaBase(BaseModel):
-    numero: Optional[str] = None
-    imagen_path: str
-    timestamp: datetime
-    tunel: Optional[str] = None
-    evento: str  # 'ingreso' o 'egreso'
-    modelo_ladrillo: Optional[str] = None  # modelo detectado o ingresado
-    merma: Optional[float] = None  # porcentaje de merma/fisuración
-    
-    # Puedes agregar más campos según necesidades futuras
+    """Modelo base para registros de vagonetas"""
+    numero: Optional[str] = Field(None, description="Número identificador de la vagoneta")
+    imagen_path: str = Field(..., description="Ruta de la imagen almacenada")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Fecha y hora del evento")
+    tunel: Optional[str] = Field(None, description="Identificador del túnel")
+    evento: str = Field(..., description="Tipo de evento: 'ingreso' o 'egreso'")
+    modelo_ladrillo: Optional[str] = Field(None, description="Modelo de ladrillo detectado o ingresado")
+    merma: Optional[float] = Field(None, description="Porcentaje de merma/fisuración", ge=0, le=100)
+    estado: Optional[str] = Field(None, description="Estado del registro: activo, anulado, etc")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Metadatos adicionales (temperatura, humedad, etc)")
 
 class VagonetaCreate(VagonetaBase):
+    # Se hereda todo de VagonetaBase
     pass
 
 class VagonetaInDB(VagonetaBase):
     id: str = Field(..., alias="_id")
-
-    class Config:
-        orm_mode = True
-        allow_population_by_field_name = True

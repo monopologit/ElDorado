@@ -28,6 +28,9 @@ const Navbar = ({ view, setView }) => {
           <button onClick={() => { setView('trayectoria'); setOpen(false); }} className={`w-full md:w-auto py-2 px-4 font-semibold rounded-lg m-1 md:m-0 ${view === 'trayectoria' ? 'bg-orange-100 text-orange-700' : 'bg-cyan-50 text-cyan-900 hover:bg-orange-50'} transition`}>
             Trayectoria
           </button>
+          <button onClick={() => { setView('guia'); setOpen(false); }} className={`w-full md:w-auto py-2 px-4 font-semibold rounded-lg m-1 md:m-0 ${view === 'guia' ? 'bg-orange-100 text-orange-700' : 'bg-cyan-50 text-cyan-900 hover:bg-orange-50'} transition`}>
+            Guía de Usuario
+          </button>
         </div>
       </div>
     </nav>

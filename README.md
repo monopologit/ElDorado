@@ -52,9 +52,52 @@ Desarrollar un sistema de visión computacional que permita identificar y trazar
 - Identificar el modelo de ladrillos cargado en cada vagoneta.
 
 ## Instalación del Proyecto
-Para instalar y ejecutar el sistema, sigue los pasos detallados en los archivos `README.md` de las carpetas `backend/` y `frontend/`.
-- El backend (API y procesamiento) está en `backend/README.md`.
-- El frontend (interfaz web) está en `frontend/README.md`.
+
+### Requisitos Previos
+1. **Python 3.9+**
+   - Descarga e instala Python desde [python.org](https://python.org)
+   - Asegúrate de marcar "Add Python to PATH" durante la instalación
+
+2. **MongoDB Community Server**
+   - Descarga MongoDB Community Server desde [mongodb.com](https://www.mongodb.com/try/download/community)
+   - Durante la instalación, selecciona "Ejecutar como servicio de Windows"
+   - La base de datos se ejecutará automáticamente al iniciar Windows
+
+3. **Node.js**
+   - Descarga e instala Node.js desde [nodejs.org](https://nodejs.org)
+   - Se recomienda la versión LTS (Long Term Support)
+
+4. **Tesseract OCR**
+   - Descarga Tesseract desde [github.com/UB-Mannheim/tesseract/wiki](https://github.com/UB-Mannheim/tesseract/wiki)
+   - Instala en la ruta por defecto (C:\Program Files\Tesseract-OCR)
+
+### Instalación Rápida
+1. Clona o descarga este repositorio
+2. Abre PowerShell como administrador
+3. Navega hasta la carpeta del proyecto
+4. Ejecuta el script de configuración:
+```powershell
+.\setup-dev-no-docker.ps1
+```
+
+### Iniciar la Aplicación
+1. Inicia el backend (en una terminal):
+```powershell
+cd backend
+.\venv\Scripts\Activate
+uvicorn main:app --reload
+```
+
+2. Inicia el frontend (en otra terminal):
+```powershell
+cd frontend
+npm start
+```
+
+3. Accede a la aplicación:
+   - Frontend: http://localhost:3000
+   - API Backend: http://localhost:8000
+   - Documentación API: http://localhost:8000/docs
 
 ## Estado Actual
 - Interfaz web y backend funcionales: permiten subir imágenes, registrar eventos, consultar historial y trayectoria de vagonetas.
@@ -85,25 +128,28 @@ Para instalar y ejecutar el sistema, sigue los pasos detallados en los archivos 
 - Integración con MongoDB para metadatos y almacenamiento externo para imágenes.
 - Futuro: integración con sistema de sensores de temperatura y humedad.
 
-## Tecnologías Utilizadas
-- **FastAPI:** API REST moderna y eficiente en Python.
-- **Uvicorn:** Servidor ASGI para FastAPI.
-- **MongoDB:** Base de datos NoSQL para metadatos y registros.
-- **Motor/PyMongo:** Conectores para interactuar con MongoDB.
-- **OpenCV:** Procesamiento y manipulación de imágenes.
-- **Ultralytics YOLOv8:** Detección automática de vagonetas y placas numeradas.
-- **Tesseract OCR:** Reconocimiento óptico de caracteres en placas.
-- **React:** Interfaz web interactiva y moderna.
-- **Axios:** Cliente HTTP para comunicación frontend-backend.
-- **python-dotenv:** Manejo flexible de variables de entorno.
+## Tecnologías Utilizadas y Para Qué Sirve Cada Una
+- **FastAPI:** Framework moderno y eficiente para construir APIs REST en Python. Permite definir endpoints para subir imágenes, videos y consultar datos de vagonetas y ladrillos.
+- **Uvicorn:** Servidor ASGI rápido y ligero para ejecutar aplicaciones FastAPI en desarrollo y producción.
+- **MongoDB:** Base de datos NoSQL utilizada para almacenar los metadatos de los eventos (número de vagoneta, modelo de ladrillo, timestamps, etc.) y rutas de imágenes.
+- **PyMongo:** Conector de Python para interactuar con MongoDB desde el backend.
+- **OpenCV:** Librería de visión computacional para procesar imágenes y videos, detectar vagonetas y recortar regiones de interés.
+- **Ultralytics YOLOv8:** Modelo de deep learning para la detección automática de vagonetas y placas numeradas en imágenes y videos.
+- **Tesseract OCR:** Motor de reconocimiento óptico de caracteres para extraer el número de chapa de las vagonetas a partir de imágenes.
+- **React:** Biblioteca de JavaScript para construir la interfaz web interactiva y moderna del sistema.
+- **Axios:** Cliente HTTP para que el frontend se comunique con el backend y consuma los endpoints de la API.
+- **Tailwind CSS:** Framework de utilidades CSS para diseñar interfaces web responsivas y modernas de forma rápida.
+- **python-dotenv:** Permite manejar variables de entorno de forma flexible y segura en el backend.
+- **aiofiles:** Permite la manipulación asíncrona de archivos en el backend, útil para subir imágenes y videos.
+- **python-multipart:** Soporte para manejar formularios y archivos subidos vía HTTP en FastAPI.
 
 ## ¿Cómo Funciona la App?
-1. El usuario sube una o varias imágenes de vagonetas desde la web.
-2. El backend procesa cada imagen, detecta el número de vagoneta, asocia los datos (evento, túnel, modelo, merma, timestamp) y guarda todo en MongoDB.
-3. El usuario puede consultar el historial, filtrar por número, fecha, evento, modelo o merma, y ver la trayectoria completa de cada vagoneta.
+1. El usuario sube una o varias imágenes (o videos) de vagonetas desde la web.
+2. El backend procesa cada imagen/video, detecta el número de vagoneta y el modelo de ladrillo usando modelos de visión computacional y OCR, y guarda los datos en MongoDB.
+3. El usuario puede consultar el historial, filtrar por número, fecha, evento, modelo o merma, y ver la trayectoria completa de cada vagoneta desde el frontend.
 
 ## Uso Típico
-- Subir imágenes de vagonetas indicando evento, túnel, modelo y merma.
+- Subir imágenes o videos de vagonetas indicando evento, túnel, modelo y merma.
 - Consultar historial y trayectoria de cada vagoneta.
 - Analizar la trazabilidad y calidad del proceso productivo.
 
@@ -168,7 +214,7 @@ Para instalar y ejecutar el sistema, sigue los pasos detallados en los archivos 
 
 ---
 
-## Cambios recientes (Mayo 2025)
+## Cambios recientes 
 
 - El backend ahora **solo guarda imágenes y registros cuando se detecta un número de vagoneta** en la imagen. Si no se detecta, la imagen se elimina automáticamente y no se almacena en la base de datos.
 - El endpoint `/upload-multiple/` informa en la respuesta cuántas imágenes fueron ignoradas por no contener vagoneta identificable (`status: "ignored"`).

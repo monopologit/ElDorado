@@ -54,3 +54,21 @@ La app se abrirá en tu navegador en http://localhost:3000
 - Node.js 16+
 - Acceso al backend corriendo en http://localhost:8000
 
+# Frontend - Interfaz Web para Seguimiento de Vagonetas
+
+Este frontend permite a los usuarios interactuar con el sistema de visión computacional, subir imágenes y videos, y consultar el historial y trayectoria de vagonetas.
+
+## Tecnologías Usadas y Para Qué Sirve Cada Una
+- **React:** Construye la interfaz web interactiva.
+- **Axios:** Permite la comunicación HTTP con el backend.
+- **Tailwind CSS:** Facilita el diseño de interfaces modernas y responsivas.
+- **react-scripts:** Scripts y utilidades para desarrollo y build de la app React.
+
+## Flujo de Interacción
+1. El usuario accede a la web y puede:
+   - Subir imágenes o videos de vagonetas.
+   - Consultar historial y trayectoria.
+   - Visualizar mensajes de éxito, error o advertencia según el resultado de cada acción.
+2. El frontend envía los archivos y datos al backend usando Axios.
+3. El backend procesa y responde, y el frontend muestra la información al usuario.
+
