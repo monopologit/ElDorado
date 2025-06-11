@@ -2,113 +2,147 @@
 # Autor: [Tu nombre o equipo]
 # Descripción: API REST para subir, procesar y consultar registros de vagonetas usando visión computacional.
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Form
+import sys # Add this import
+import os # Add this import
+import json
+import uuid
+import cv2
+import shutil
+import traceback
+import asyncio # <--- AÑADIDO IMPORT ASYNCIO
+from contextlib import asynccontextmanager # <--- IMPORTADO PARA LIFESPAN
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Form, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-import shutil
-import os
-import tempfile
-import glob
-import uvicorn
-import asyncio
 from datetime import datetime
 from typing import List, Dict, Optional, Any
-import crud
-from utils.image_processing import detectar_vagoneta_y_placa, detectar_vagoneta_y_placa_mejorado, detectar_modelo_ladrillo
-from utils.ocr import extract_number_from_image # Changed from ocr_placa_img
-from utils.camera_capture import CameraCapture
-from utils.auto_capture_system import AutoCaptureManager, CAMERAS_CONFIG
-from database import connect_to_mongo, close_mongo_connection, get_database
-import cv2
-import numpy as np
+
+# Cambiando a importaciones directas
+import crud # Anteriormente: from .import crud
+from utils.image_processing import detectar_vagoneta_y_placa, detectar_vagoneta_y_placa_mejorado, detectar_modelo_ladrillo # Anteriormente: from .utils.image_processing import ...
+from utils.ocr import extract_number_from_image # Anteriormente: from .utils.ocr import ...
+from utils.camera_capture import CameraCapture # Anteriormente: from .utils.camera_capture import ...
+from utils.auto_capture_system import AutoCaptureManager, load_cameras_config # Anteriormente: from .utils.auto_capture_system import ...
+from database import connect_to_mongo, close_mongo_connection, get_database # Anteriormente: from .database import ...
 from collections import Counter
-from schemas import VagonetaCreate, VagonetaInDB
-import asyncio
-import base64
-import io
-from utils.image_processing import processor
+from schemas import VagonetaCreate, VagonetaInDB # Anteriormente: from .schemas import ...
+from utils.image_processing import processor # Anteriormente: from .utils.image_processing import processor
+from bson import ObjectId # Import ObjectId
+
+# WebSocket Connection Manager (from incoming changes 5b494cfd2b9733b80f9777f03a9f343d1a5e61a8)
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"WebSocket connection established: {websocket.client}")
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+        print(f"WebSocket connection closed: {websocket.client}")
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+    async def broadcast_json(self, data: dict):
+        # Ensure datetime objects are serialized
+        # This part uses `datetime` which should be imported if not already.
+        # Checking existing imports: `from datetime import datetime` is present.
+        for key, value in data.items():
+            if isinstance(value, datetime):
+                data[key] = value.isoformat()
+        
+        for connection in self.active_connections:
+            await connection.send_json(data)
+
+manager = ConnectionManager() # from incoming changes 5b494cfd2b9733b80f9777f03a9f343d1a5e61a8
 
 # Función para procesar videos MP4
-async def procesar_video_mp4(video_path: str) -> Optional[str]: # Asegurar que Optional se importa de typing
+async def procesar_video_mp4_streamable(video_path: str, upload_dir: Path):
     """
-    Procesa un video MP4 frame por frame para detectar números de vagonetas
-    Retorna el primer número detectado con alta confianza
+    Procesa un video MP4 frame por frame para detectar números de vagonetas,
+    emitiendo actualizaciones de progreso.
     """
+    yield {"type": "status", "stage": "initialization", "message": f"Iniciando procesamiento de video: {Path(video_path).name}"}
+    
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        yield {"type": "error", "stage": "initialization", "message": f"Error al abrir el video: {video_path}"}
+        return
+
+    detections = {}
+    frame_count = 0
+    # Ensure processed_frames_dir is correctly defined if used, or remove if not.
+    # processed_frames_dir = upload_dir / "processed_frames" / str(uuid.uuid4())
+    # os.makedirs(processed_frames_dir, exist_ok=True) # This was commented out, if needed, ensure uuid and os are imported here.
+    
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    yield {"type": "progress", "stage": "setup", "message": "Video abierto y listo para procesar.", "total_frames": total_frames, "current_frame": 0}
+
     try:
-        print(f"📹 Iniciando procesamiento de video: {video_path}")
-
-        cap = cv2.VideoCapture(video_path)
-
-        if not cap.isOpened():
-            raise ValueError(f"No se pudo abrir el video: {video_path}")
-
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        print(f"📊 Video info: {total_frames} frames, {fps:.2f} FPS")
-
-        frame_count = 0
-        frames_to_skip = max(1, int(fps // 3))
-        max_frames = min(50, total_frames // frames_to_skip)
-
-        numeros_detectados = []
-
-        while cap.isOpened() and frame_count < max_frames:
-            for _ in range(frames_to_skip):
-                ret_skip = cap.read()[0]
-                if not ret_skip:
-                    break
-            if not cap.isOpened() or not ret_skip:
-                break
-
+        while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
+                yield {"type": "status", "stage": "frame_processing", "message": "Fin de los frames o error al leer."}
                 break
+            
+            frame_count += 1
+            if frame_count % 5 != 0:  # Procesar cada 5 frames para optimizar
+                if frame_count % 100 == 0: # Send a heartbeat progress for skipped frames less frequently
+                    yield {"type": "progress", "stage": "frame_processing", "message": f"Avanzando video...", "current_frame": frame_count, "total_frames": total_frames}
+                continue
 
-            print(f"🔍 Procesando frame {frame_count + 1}/{max_frames}")
+            yield {"type": "progress", "stage": "frame_processing", "message": f"Procesando frame {frame_count}/{total_frames}", "current_frame": frame_count, "total_frames": total_frames}
+
+            if frame is None or frame.size == 0:
+                yield {"type": "warning", "stage": "frame_processing", "message": f"Frame {frame_count} es None o está vacío."}
+                continue
+
+            # temp_frame_path = processed_frames_dir / f"frame_{frame_count}.jpg"
+            # cv2.imwrite(str(temp_frame_path), frame) # Opcional: guardar frame
 
             try:
-                cropped_placa_img, bbox_vagoneta, bbox_placa, numero, confianza_placa = detectar_vagoneta_y_placa_mejorado(frame)
+                _, _, _, numero_detectado, confianza_placa = detectar_vagoneta_y_placa_mejorado(frame)
+                
+                if numero_detectado and confianza_placa is not None:
+                    yield {
+                        "type": "detection_update", 
+                        "stage": "frame_processing",
+                        "frame": frame_count, 
+                        "numero": numero_detectado, 
+                        "confianza": float(confianza_placa) # Asegurar que sea float para JSON
+                    }
+                    if numero_detectado not in detections or confianza_placa > detections[numero_detectado]:
+                        detections[numero_detectado] = confianza_placa
+            except Exception as e_detect:
+                yield {"type": "warning", "stage": "frame_processing", "message": f"Error detectando en frame {frame_count}: {str(e_detect)}"}
+                # traceback.print_exc() # Podrías querer loguearlo en servidor en lugar de enviarlo siempre
 
-                if numero and numero.strip():
-                    numeros_detectados.append(numero.strip())
-                    print(f"✅ Número detectado en frame {frame_count}: {numero}")
-
-                    if len(numeros_detectados) >= 3:
-                        ultimo_numero = numeros_detectados[-1]
-                        count_ultimo = numeros_detectados[-10:].count(ultimo_numero)
-                        if count_ultimo >= 3:
-                            print(f"🏁 Detección consistente de '{ultimo_numero}', finalizando procesamiento de video.")
-                            cap.release()
-                            return ultimo_numero
-                else:
-                    print(f"❌ No se detectó número en frame {frame_count}")
-
-            except Exception as frame_error:
-                import traceback
-                print(f"⚠️ Error procesando frame {frame_count}: {str(frame_error)}")
-                traceback.print_exc()
-
-            frame_count += 1
-
-        cap.release()
-
-        if numeros_detectados:
-            numero_mas_comun = max(set(numeros_detectados), key=numeros_detectados.count)
-            frecuencia = numeros_detectados.count(numero_mas_comun)
-            print(f"📈 Números detectados: {numeros_detectados}")
-            print(f"🏆 Número más común: {numero_mas_comun} (detectado {frecuencia} veces)")
-            return numero_mas_comun
-        else:
-            print("❌ No se detectó ningún número en todo el video")
-            return None
-
-    except Exception as e:
-        import traceback
-        print(f"💥 Error GRANDE procesando video: {str(e)}")
+    except Exception as e_video:
+        yield {"type": "error", "stage": "video_processing_error", "message": f"Error mayor durante el procesamiento del video: {str(e_video)}"}
         traceback.print_exc()
-        return None
+        # No emitir final_result si hay un error catastrófico aquí
+        return 
+    finally:
+        cap.release()
+        yield {"type": "status", "stage": "cleanup", "message": f"Video {Path(video_path).name} procesado. Total frames leídos: {frame_count}."}
+        # shutil.rmtree(processed_frames_dir) # Opcional: limpiar frames
+
+    if not detections:
+        yield {"type": "final_result", "stage": "completion", "data": None, "message": "No se detectaron números en el video."}
+    else:
+        # Asegurar que la confianza sea float para JSON
+        final_detections_serializable = {k: float(v) for k, v in detections.items()}
+        yield {"type": "final_result", "stage": "completion", "data": final_detections_serializable, "message": "Detecciones finales recopiladas."}
 
 # Función auxiliar para convertir string a float
 def parse_merma(merma_str: str) -> Optional[float]:
@@ -120,21 +154,27 @@ def parse_merma(merma_str: str) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
+# Lifespan manager para manejar eventos de inicio y cierre
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    # Lógica de inicio
+    print("INFO:     Iniciando aplicación...")
+    connect_to_mongo()
+    app_instance.state.pending_video_processing = {}  # Inicializar el almacén de tareas
+    print("INFO:     Aplicación iniciada y base de datos conectada.")
+    yield
+    # Lógica de cierre
+    print("INFO:     Cerrando aplicación...")
+    close_mongo_connection()
+    print("INFO:     Aplicación apagada y conexión a base de datos cerrada.")
+
 # Inicializa la app FastAPI
 app = FastAPI(
     title="API de Seguimiento de Vagonetas",
     description="Sistema de trazabilidad y seguimiento de vagonetas con visión computacional",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan  # Usar el nuevo lifespan manager
 )
-
-# Eventos de inicio y cierre
-@app.on_event("startup")
-async def startup_db_client():
-    connect_to_mongo()
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    close_mongo_connection()
 
 # Habilita CORS para permitir peticiones desde el frontend React
 app.add_middleware(
@@ -148,6 +188,8 @@ app.add_middleware(
 # Carpeta donde se guardan las imágenes subidas
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+TEMP_CHUNK_DIR = UPLOAD_DIR / "temp_chunks"
+TEMP_CHUNK_DIR.mkdir(exist_ok=True)
 
 # Sirve las imágenes subidas como archivos estáticos
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -158,6 +200,7 @@ active_cameras: Dict[str, CameraCapture] = {}
 # Variable global para el sistema de captura automática
 auto_capture_manager = None
 auto_capture_task = None
+CAMERAS_CONFIG = load_cameras_config() # Load camera configs here
 
 # --- ENDPOINTS PRINCIPALES ---
 
@@ -206,7 +249,8 @@ async def upload_image(
             metadata=metadata
         )
         
-        record_id = await crud.create_vagoneta_record(vagoneta)
+        # Quitar await porque create_vagoneta_record es síncrona
+        record_id = crud.create_vagoneta_record(vagoneta) 
         
         return {
             "message": "Registro creado exitosamente",
@@ -257,18 +301,40 @@ async def upload_files(
             
             timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
             save_path = UPLOAD_DIR / f"{timestamp}_{file.filename}"
-              # Guardar archivo
             with save_path.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             
+            numero_detectado = None
+            confianza_placa = None
+            modelo_ladrillo = None
+            record_id = None # Inicializar record_id
+
             if is_image:
-                # Procesar imagen
-                cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado = detectar_vagoneta_y_placa_mejorado(str(save_path))
-            else:
-                # Procesar video
-                numero_detectado = await procesar_video_mp4(str(save_path))
+                cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado, confianza_placa = detectar_vagoneta_y_placa_mejorado(str(save_path))
+                modelo_ladrillo = detectar_modelo_ladrillo(str(save_path))
+            elif is_video:
+                # Para /upload-multiple/, si se quiere mantener el procesamiento de video síncrono aquí,
+                # se necesitaría una función que no sea streamable, o adaptar para usar el stream.
+                # Por ahora, vamos a devolver un placeholder o error indicando que se use la subida por chunks para videos.
+                # O, si se decide que /upload-multiple/ no manejará videos directamente y solo imágenes:
+                results.append({
+                    "filename": file.filename,
+                    "status": "error",
+                    "error": "Para videos, por favor use la funcionalidad de subida individual (que soporta chunks y procesamiento en segundo plano)."
+                })
+                if save_path.exists(): os.remove(save_path) # Limpiar el video no procesado
+                continue
+
+                # Comentado: La lógica original de procesar_video_mp4 ya no existe directamente aquí.
+                # detection_results = await procesar_video_mp4(str(save_path), UPLOAD_DIR) 
+                # if detection_results:
+                #     if isinstance(detection_results, dict) and detection_results:
+                #         if detection_results:
+                #             numero_detectado = max(detection_results, key=detection_results.get)
+                #             confianza_placa = detection_results[numero_detectado]
+                # modelo_ladrillo = None 
             
-            if not numero_detectado:
+            if not numero_detectado and is_image: # Solo continuar para imágenes si hubo detección
                 try:
                     os.remove(save_path)
                 except:
@@ -280,27 +346,28 @@ async def upload_files(
                 })
                 continue
             
-            modelo_ladrillo = detectar_modelo_ladrillo(str(save_path))
-            
-            vagoneta = VagonetaCreate(
-                numero=numero_detectado,
-                imagen_path=f"uploads/{save_path.name}",
-                timestamp=datetime.utcnow(),
-                tunel=tunel,
-                evento=evento,
-                modelo_ladrillo=modelo_ladrillo,
-                merma=parse_merma(merma),
-                metadata=metadata
-            )
-            
-            record_id = await crud.create_vagoneta_record(vagoneta)
+            if is_image: # Solo crear registro para imágenes en este endpoint por ahora
+                vagoneta = VagonetaCreate(
+                    numero=numero_detectado,
+                    imagen_path=f"uploads/{save_path.name}",
+                    timestamp=datetime.utcnow(),
+                    tunel=tunel,
+                    evento=evento,
+                    modelo_ladrillo=modelo_ladrillo,
+                    merma=parse_merma(merma),
+                    metadata=metadata,
+                    confianza=confianza_placa
+                )
+                record_id = crud.create_vagoneta_record(vagoneta)
             
             results.append({
                 "filename": file.filename,
-                "status": "ok",
-                "record_id": record_id,
+                "status": "ok" if is_image else "pending_chunk_upload_for_video", # Cambiar status para video
+                "record_id": str(record_id) if record_id else None,
                 "numero_detectado": numero_detectado,
-                "modelo_ladrillo": modelo_ladrillo
+                "modelo_ladrillo": modelo_ladrillo,
+                "confianza": confianza_placa,
+                "message": "Para videos, usar subida individual." if is_video else "Imagen procesada."
             })
             
         except Exception as e:
@@ -316,541 +383,368 @@ async def upload_files(
     
     return {"results": results}
 
-@app.get("/vagonetas/",
-    response_model=List[VagonetaInDB],
-    summary="Consultar historial de vagonetas",
-    description="Consulta el historial con múltiples filtros disponibles.")
-async def get_vagonetas(
-    numero: Optional[str] = Query(None, description="Número de vagoneta"),
-    fecha: Optional[str] = Query(None, description="Fecha en formato YYYY-MM-DD"),
-    tunel: Optional[str] = Query(None, description="Filtrar por túnel"),
-    modelo: Optional[str] = Query(None, description="Filtrar por modelo de ladrillo"),
-    evento: Optional[str] = Query(None, description="Filtrar por tipo de evento"),
-    merma_min: Optional[float] = Query(None, ge=0, le=100, description="Merma mínima"),
-    merma_max: Optional[float] = Query(None, ge=0, le=100, description="Merma máxima"),
-    skip: int = Query(0, ge=0, description="Registros a saltar"),
-    limit: int = Query(50, ge=1, le=100, description="Límite de registros")
-):
-    registros = crud.get_vagonetas_historial(
-        skip=skip,
-        limit=limit,
-        numero=numero,
-        fecha=fecha,
-        tunel=tunel,
-        modelo=modelo,
-        evento=evento,
-        merma_min=merma_min,
-        merma_max=merma_max
-    )
-    return registros
+# --- ENDPOINTS PARA SUBIDA EN TROZOS (CHUNKING) ---
 
-@app.get("/trayectoria/{numero}",
-    response_model=Dict,
-    summary="Trayectoria completa de vagoneta",
-    description="Obtiene todos los eventos y estadísticas de una vagoneta específica.")
-async def trayectoria_vagoneta(numero: str):
-    registros = crud.get_trayectoria_completa(numero)
-    estadisticas = crud.get_estadisticas_vagoneta(numero)
-    
-    if not registros:
-        raise HTTPException(status_code=404, detail="Vagoneta no encontrada")
-    
-    return {
-        "numero": numero,
-        "eventos": registros,
-        "estadisticas": estadisticas
-    }
-
-@app.delete("/vagonetas/{record_id}",
-    summary="Anular registro",
-    description="Anula (soft delete) un registro específico.")
-async def anular_registro(record_id: str):
-    success = await crud.anular_registro(record_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Registro no encontrado")
-    return {"message": "Registro anulado exitosamente"}
-
-@app.put("/vagonetas/{record_id}",
-    summary="Actualizar registro",
-    description="Actualiza campos específicos de un registro.")
-async def actualizar_registro(
-    record_id: str,
-    data: Dict
-):
-    success = await crud.actualizar_registro(record_id, data)
-    if not success:
-        raise HTTPException(status_code=404, detail="Registro no encontrado")
-    return {"message": "Registro actualizado exitosamente"}
-
-@app.get("/search",
-    response_model=List[VagonetaInDB],
-    summary="Búsqueda de texto",
-    description="Búsqueda de texto completo en registros.")
-async def buscar_registros(
-    q: str = Query(..., min_length=2, description="Texto a buscar"),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100)
-):
-    return await crud.buscar_vagonetas(q, skip, limit)
-
-# --- ENDPOINTS DE CÁMARAS ---
-
-@app.post("/cameras/start",
-    summary="Iniciar cámara",
-    description="Inicia la captura automática desde una cámara.")
-async def start_camera(
-    camera_config: dict,
-    background_tasks: BackgroundTasks
+@app.post("/upload-chunk/")
+async def upload_chunk(
+    fileChunk: UploadFile = File(...),
+    fileId: str = Form(...),
+    chunkNumber: int = Form(...),
+    totalChunks: int = Form(...),
+    originalFilename: str = Form(...)
 ):
     try:
-        camera = CameraCapture(**camera_config)
-        active_cameras[camera_config["camera_id"]] = camera
-        background_tasks.add_task(camera.start)
-        return {"message": f"Cámara {camera_config['camera_id']} iniciada"}
+        chunk_dir = TEMP_CHUNK_DIR / fileId
+        chunk_dir.mkdir(exist_ok=True)
+        
+        chunk_path = chunk_dir / f"chunk_{chunkNumber}"
+        with open(chunk_path, "wb") as buffer:
+            shutil.copyfileobj(fileChunk.file, buffer)
+        
+        print(f"📦 Recibido chunk {chunkNumber + 1}/{totalChunks} para {originalFilename} (ID: {fileId})")
+        
+        # Opcional: verificar si todos los chunks han llegado y ensamblar aquí
+        # si no se quiere un endpoint /finalize-upload/ separado para cada archivo.
+        # Por ahora, separamos la finalización.
+
+        return {"message": f"Chunk {chunkNumber + 1}/{totalChunks} for {originalFilename} received successfully."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Error recibiendo chunk para {originalFilename} (ID: {fileId}): {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error processing chunk: {str(e)}")
 
-@app.post("/cameras/stop/{camera_id}",
-    summary="Detener cámara",
-    description="Detiene la captura de una cámara específica.")
-async def stop_camera(camera_id: str):
-    if camera_id in active_cameras:
-        await active_cameras[camera_id].stop()
-        del active_cameras[camera_id]
-        return {"message": f"Cámara {camera_id} detenida"}
-    raise HTTPException(status_code=404, detail="Cámara no encontrada")
+@app.post("/finalize-upload/")
+async def finalize_upload(
+    fileId: str = Form(...),
+    originalFilename: str = Form(...),
+    totalChunks: int = Form(...),
+    tunel: str = Form(None),
+    evento: str = Form(...),
+    merma: str = Form(None),
+    metadata_str: Optional[str] = Form(None)
+):
+    import json # Mover import json dentro si solo se usa aquí
+    metadata: Optional[Dict] = None
+    if metadata_str:
+        try:
+            metadata = json.loads(metadata_str)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid metadata JSON string")
 
-@app.get("/cameras/status",
-    summary="Estado de cámaras",
-    description="Obtiene el estado de todas las cámaras activas.")
-def get_cameras_status():
-    return {
-        camera_id: {
-            "evento": camera.evento,
-            "tunel": camera.tunel,
-            "is_running": camera.is_running,
-            "last_detection": camera.last_detection_time,
-            "detection_count": camera.detection_count if hasattr(camera, 'detection_count') else 0
+    chunk_dir = TEMP_CHUNK_DIR / fileId
+    if not chunk_dir.exists():
+        raise HTTPException(status_code=404, detail=f"No chunks found for file ID: {fileId}")
+
+    # Verificar que todos los chunks están presentes
+    for i in range(totalChunks):
+        chunk_path = chunk_dir / f"chunk_{i}"
+        if not chunk_path.exists():
+            # Limpiar chunks si falta alguno antes de fallar
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=f"Missing chunk {i} for file ID: {fileId}")
+
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    final_save_path = UPLOAD_DIR / f"{timestamp}_{originalFilename}"
+    
+    print(f"🧩 Ensamblando archivo: {final_save_path} desde {totalChunks} chunks (ID: {fileId})")
+    try:
+        with open(final_save_path, "wb") as final_file:
+            for i in range(totalChunks):
+                chunk_path = chunk_dir / f"chunk_{i}"
+                with open(chunk_path, "rb") as chunk_file:
+                    final_file.write(chunk_file.read())
+        print(f"✅ Archivo {originalFilename} ensamblado exitosamente en {final_save_path}")
+        shutil.rmtree(chunk_dir)
+        print(f"🧹 Chunks temporales para {fileId} eliminados.")
+    except Exception as e:
+        # ... (manejo de error de ensamblaje y limpieza como antes) ...
+        print(f"❌ Error ensamblando archivo {originalFilename} (ID: {fileId}): {e}")
+        traceback.print_exc()
+        if chunk_dir.exists():
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+        if final_save_path.exists():
+            try:
+                os.remove(final_save_path)
+            except OSError: pass
+        raise HTTPException(status_code=500, detail=f"Error assembling file: {str(e)}")
+
+    # Determinar tipo de archivo
+    file_ext = Path(originalFilename).suffix.lower()
+    is_image = file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp']
+    is_video = file_ext in ['.mp4', '.avi', '.mov', '.mkv']
+
+    if is_image:
+        try:
+            print(f"🖼️  Procesando imagen ensamblada: {final_save_path}")
+            _, _, _, numero_detectado, confianza_placa = detectar_vagoneta_y_placa_mejorado(str(final_save_path))
+            modelo_ladrillo = detectar_modelo_ladrillo(str(final_save_path))
+
+            if not numero_detectado:
+                try: os.remove(final_save_path)
+                except OSError: pass
+                return JSONResponse(
+                    content={"message": f"No se detectó vagoneta con número en {originalFilename}", "status": "ignored", "filename": originalFilename},
+                    status_code=200
+                )
+
+            vagoneta_data = VagonetaCreate(
+                numero=numero_detectado,
+                imagen_path=f"uploads/{final_save_path.name}",
+                timestamp=datetime.utcnow(),
+                tunel=tunel,
+                evento=evento,
+                modelo_ladrillo=modelo_ladrillo,
+                merma=parse_merma(merma),
+                metadata=metadata,
+                confianza=confianza_placa
+            )
+            record_id = crud.create_vagoneta_record(vagoneta_data)
+            
+            response_data = {
+                "filename": originalFilename, "status": "ok", "record_id": str(record_id),
+                "numero_detectado": numero_detectado, "modelo_ladrillo": modelo_ladrillo,
+                "confianza": confianza_placa, "message": f"File {originalFilename} processed and record created successfully."
+            }
+            return JSONResponse(content=response_data)
+        except Exception as e:
+            if final_save_path.exists():
+                try: os.remove(final_save_path)
+                except OSError: pass
+            print(f"❌ Error procesando imagen ensamblada {originalFilename}: {e}")
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Error processing assembled image: {str(e)}")
+
+    elif is_video:
+        processing_id = str(uuid.uuid4())
+        app.state.pending_video_processing[processing_id] = {
+            "video_path": str(final_save_path),
+            "original_filename": originalFilename,
+            "upload_dir": str(UPLOAD_DIR), # Convertir Path a str para almacenar en dict/JSON
+            "tunel": tunel,
+            "evento": evento,
+            "merma_str": merma, # Guardar como string, parsear luego
+            "metadata": metadata, # Ya es un dict o None
+            "timestamp": datetime.utcnow() # Para posible limpieza de tareas antiguas
         }
-        for camera_id, camera in active_cameras.items()
-    }
+        print(f"📹 Video {originalFilename} listo para procesamiento en segundo plano. ID: {processing_id}")
+        return JSONResponse(content={
+            "status": "video_processing_pending",
+            "processing_id": processing_id,
+            "filename": originalFilename,
+            "message": "El video está siendo procesado. Conéctese al stream para ver el progreso."
+        })
+    else:
+        if final_save_path.exists():
+            try: os.remove(final_save_path)
+            except OSError: pass
+        raise HTTPException(status_code=400, detail=f"Unsupported file type after assembly: {file_ext}")
+
+
+@app.get("/stream-video-processing/{processing_id}")
+async def stream_video_processing(processing_id: str):
+    if processing_id not in app.state.pending_video_processing:
+        raise HTTPException(status_code=404, detail="Video processing ID not found or already processed.")
+
+    task_info = app.state.pending_video_processing[processing_id]
+    # db = get_database() # Ya no es necesario aquí si crud lo maneja o no se usa directamente en este bloque
+
+    async def event_generator():
+        final_detection_data = None
+        processing_error_occurred = False
+        # record_created_successfully = False # No se usa actualmente en este scope
+        error_message_detail = "Unknown error during video processing."
+        video_file_to_delete = task_info.get("video_path") # Guardar antes de que se elimine task_info
+
+        try:
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'stream_init', 'message': 'Conectado al stream de procesamiento de video.'})}\\n\\n"
+            
+            async for update in procesar_video_mp4_streamable(task_info["video_path"], Path(task_info["upload_dir"])):
+                yield f"data: {json.dumps(update)}\\n\\n"
+                if update.get("type") == "final_result":
+                    final_detection_data = update.get("data")
+                elif update.get("type") == "error": 
+                    processing_error_occurred = True
+                    error_message_detail = update.get("message", error_message_detail)
+            
+            # Lógica de creación de registro después de procesar el video
+            if not processing_error_occurred and final_detection_data: 
+                best_numero_from_video = None
+                max_confianza_from_video = -1.0
+                
+                if isinstance(final_detection_data, dict) and final_detection_data:
+                    for numero, confianza in final_detection_data.items():
+                        if confianza > max_confianza_from_video:
+                            max_confianza_from_video = confianza
+                            best_numero_from_video = numero
+                
+                if best_numero_from_video:
+                    vagoneta_video_data = VagonetaCreate(
+                        numero=best_numero_from_video,
+                        imagen_path=f"uploads/{Path(task_info['video_path']).name}", # Usar el path relativo
+                        timestamp=task_info.get("timestamp", datetime.utcnow()),
+                        tunel=task_info.get("tunel"),
+                        evento=task_info.get("evento"),
+                        modelo_ladrillo=None, # Modelo de ladrillo no se detecta en videos actualmente
+                        merma=parse_merma(task_info.get("merma_str")),
+                        metadata=task_info.get("metadata"),
+                        confianza=float(max_confianza_from_video) if max_confianza_from_video != -1.0 else None
+                    )
+                    try:
+                        record_id = crud.create_vagoneta_record(vagoneta_video_data)
+                        yield f"data: {json.dumps({'type': 'status', 'stage': 'completion', 'message': f'Registro de video creado con ID: {record_id}', 'record_id': str(record_id)})}\\n\\n"
+                        # record_created_successfully = True # No se usa actualmente
+                    except Exception as e_crud:
+                        yield f"data: {json.dumps({'type': 'error', 'stage': 'db_error', 'message': f'Error al crear registro en BD para video: {str(e_crud)}'})}\\n\\n"
+                else: 
+                    yield f"data: {json.dumps({'type': 'status', 'stage': 'completion', 'message': 'No se detectó un número claro en el video para crear registro.'})}\\n\\n"
+            
+            elif processing_error_occurred: # Error durante el procesamiento del streamable
+                 yield f"data: {json.dumps({'type': 'completion_error', 'status': 'error', 'message': f'El procesamiento del video falló: {error_message_detail}'})}\\n\\n"
+            
+            elif not processing_error_occurred and final_detection_data is None: # No hubo error, pero no se obtuvieron detecciones finales
+                yield f"data: {json.dumps({'type': 'status', 'stage': 'completion', 'message': 'Procesamiento de video completado. No se encontraron detecciones para crear un registro.'})}\\n\\n"
+        
+        except Exception as e_stream:
+            # processing_error_occurred = True # Ya no es necesario, el error se propaga
+            error_message_detail = f"Error inesperado en el stream de procesamiento: {str(e_stream)}"
+            try: # Intentar enviar un último mensaje de error si el stream sigue activo
+                yield f"data: {json.dumps({'type': 'error', 'status': 'error', 'stage': 'stream_error', 'message': error_message_detail})}\\n\\n"
+            except Exception:
+                pass # El cliente pudo haberse desconectado
+            traceback.print_exc()
+        
+        finally:
+            app.state.pending_video_processing.pop(processing_id, None)
+            if video_file_to_delete:
+                try:
+                    video_path_obj = Path(video_file_to_delete)
+                    if video_path_obj.exists():
+                        os.remove(video_path_obj)
+                        # Intentar enviar mensaje de eliminación. Puede fallar si el cliente ya cerró.
+                        try:
+                            yield f"data: {json.dumps({'type': 'status', 'stage': 'cleanup', 'message': f'Archivo de video temporal {video_path_obj.name} eliminado.'})}\\n\\n"
+                        except Exception: pass
+                        print(f"🗑️ Archivo de video temporal {video_file_to_delete} eliminado.")
+                except Exception as e_delete:
+                    try:
+                        yield f"data: {json.dumps({'type': 'warning', 'stage': 'cleanup', 'message': f'No se pudo eliminar el archivo de video temporal {video_file_to_delete}: {e_delete}'})}\\n\\n"
+                    except Exception: pass
+                    print(f"⚠️ No se pudo eliminar el archivo de video temporal {video_file_to_delete}: {e_delete}")
+            # Señal de fin de stream explícita
+            try:
+                yield f"data: {json.dumps({'type': 'stream_end', 'message': 'Stream de procesamiento finalizado.'})}\\n\\n"
+            except Exception: pass
+
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+# --- ENDPOINTS DE CONSULTA ---
+
+@app.get("/historial/", 
+    response_model=List[VagonetaInDB],
+    summary="Obtener historial de registros",
+    description="Recupera una lista paginada de todos los registros de vagonetas.")
+async def get_historial_registros(
+    skip: int = Query(0, ge=0, description="Número de registros a saltar para paginación"),
+    limit: int = Query(10, ge=1, le=100, description="Número máximo de registros a devolver")
+):
+    db = get_database()
+    registros_cursor = db.vagonetas.find().sort("timestamp", -1).skip(skip).limit(limit)
+    
+    registros_list = []
+    for r_doc in registros_cursor: 
+        r_doc["_id"] = str(r_doc["_id"])
+        registros_list.append(VagonetaInDB(**r_doc)) 
+
+    return registros_list
+
+@app.get("/registros/{registro_id}", 
+    response_model=VagonetaInDB,
+    summary="Obtener un registro específico",
+    description="Recupera un registro de vagoneta por su ID.")
+async def get_registro_por_id(registro_id: str):
+    db = get_database() 
+    try:
+        obj_id = ObjectId(registro_id)
+    except Exception: 
+        raise HTTPException(status_code=400, detail="ID de registro inválido.")
+
+    registro_doc = await db.vagonetas.find_one({"_id": obj_id}) 
+    
+    if registro_doc is not None:
+        registro_doc["_id"] = str(registro_doc["_id"]) 
+        return VagonetaInDB(**registro_doc)
+    raise HTTPException(status_code=404, detail="Registro no encontrado")
+
 
 @app.get("/health",
     summary="Healthcheck",
     description="Verifica que el backend está funcionando correctamente.")
 def health():
-    return {
-        "status": "ok",
-        "timestamp": datetime.utcnow(),
-        "active_cameras": len(active_cameras)
-    }
+    return {"status": "ok", "message": "API de Vagonetas funcionando!"}
 
 # --- ENDPOINTS DE CAPTURA AUTOMÁTICA ---
 
 @app.post("/auto-capture/start")
 async def start_auto_capture():
-    """Inicia el sistema de captura automática"""
-    global auto_capture_manager, auto_capture_task
+    global auto_capture_manager, auto_capture_task, CAMERAS_CONFIG
+    if auto_capture_manager and auto_capture_manager.is_running():
+        raise HTTPException(status_code=400, detail="La captura automática ya está en ejecución.")
     
-    if auto_capture_task and not auto_capture_task.done():
-        return {"status": "error", "message": "El sistema de captura automática ya está en ejecución"}
-    
-    try:
-        auto_capture_manager = AutoCaptureManager(CAMERAS_CONFIG)
-        auto_capture_task = asyncio.create_task(auto_capture_manager.start_all())
-        return {"status": "success", "message": "Sistema de captura automática iniciado"}
-    except Exception as e:
-        return {"status": "error", "message": f"Error al iniciar captura automática: {str(e)}"}
+    db = get_database()
+    auto_capture_manager = AutoCaptureManager(CAMERAS_CONFIG, db, UPLOAD_DIR, manager) 
+    auto_capture_task = asyncio.create_task(auto_capture_manager.start_system())
+    return {"message": "Sistema de captura automática iniciado."}
 
 @app.post("/auto-capture/stop")
 async def stop_auto_capture():
-    """Detiene el sistema de captura automática"""
     global auto_capture_manager, auto_capture_task
+    if not auto_capture_manager or not auto_capture_manager.is_running():
+        raise HTTPException(status_code=400, detail="La captura automática no está en ejecución.")
     
-    if not auto_capture_task or auto_capture_task.done():
-        return {"status": "error", "message": "El sistema de captura automática no está ejecutándose"}
-    
-    try:
-        if auto_capture_manager:
-            await auto_capture_manager.stop_all()
-        if auto_capture_task:
-            auto_capture_task.cancel()
-        return {"status": "success", "message": "Sistema de captura automática detenido"}
-    except Exception as e:
-        return {"status": "error", "message": f"Error al detener captura automática: {str(e)}"}
+    await auto_capture_manager.stop_system()
+    auto_capture_manager = None
+    auto_capture_task = None
+    return {"message": "Sistema de captura automática detenido."}
 
 @app.get("/auto-capture/status")
-async def get_auto_capture_status():
-    """Obtiene el estado del sistema de captura automática"""
-    global auto_capture_task
-    
-    if not auto_capture_task:
-        status = "stopped"
-    elif auto_capture_task.done():
-        status = "stopped"
-    else:
-        status = "running"
-    
-    # Obtener estadísticas si está ejecutándose
-    stats = {}
-    if auto_capture_manager and status == "running":
-        stats = {camera.camera_id: camera.stats for camera in auto_capture_manager.cameras}
-    
-    return {
-        "status": status,
-        "cameras_configured": len(CAMERAS_CONFIG),
-        "statistics": stats
-    }
+async def auto_capture_status():
+    global auto_capture_manager
+    if auto_capture_manager and auto_capture_manager.is_running():
+        return {"status": "running", "details": auto_capture_manager.get_status()}
+    return {"status": "stopped"}
 
-@app.get("/auto-capture/config")
-async def get_auto_capture_config():
-    """Obtiene la configuración actual de las cámaras"""
-    return {"cameras": CAMERAS_CONFIG}
 
-@app.put("/auto-capture/config")
-async def update_auto_capture_config(new_config: dict):
-    """Actualiza la configuración de las cámaras"""
-    global CAMERAS_CONFIG
+# WebSocket endpoint for real-time detections
+@app.websocket("/ws/detections")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
     try:
-        CAMERAS_CONFIG.clear()
-        CAMERAS_CONFIG.extend(new_config.get("cameras", []))
-        return {"status": "success", "message": "Configuración actualizada"}
+        while True:
+            data = await websocket.receive_text() 
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        print(f"Client {websocket.client} disconnected from WebSocket.")
     except Exception as e:
-        return {"status": "error", "message": f"Error al actualizar configuración: {str(e)}"}
+        print(f"Error en WebSocket: {e}")
+        manager.disconnect(websocket)
+
+
+# --- ENDPOINTS DE INFORMACIÓN Y UTILIDADES ---
 
 @app.get("/model/info",
     summary="Información del modelo",
     description="Obtiene información detallada del modelo YOLOv8 NumerosCalados en uso.")
 async def get_model_info():
-    """Obtiene información del modelo actual"""
-    try:
-        model_info = {
-            "model_type": "YOLOv8 NumerosCalados",
-            "model_path": processor.model.model_path if hasattr(processor.model, 'model_path') else "best.pt",
-            "classes_count": len(processor.model.names),
-            "classes": list(processor.model.names.values()),
-            "confidence_threshold": processor.min_confidence,
-            "model_size": "~14MB",
-            "last_updated": "2024-12-01",
-            "training_epochs": 150,
-            "image_size": 1280,
-            "dataset": "NewCarro_NumCal_v8 (Roboflow)"
-        }
-        return model_info
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error obteniendo información del modelo: {str(e)}")
+    if hasattr(processor, 'get_model_details') and callable(processor.get_model_details):
+        return processor.get_model_details()
+    elif hasattr(processor, 'model_name'): 
+        return {"model_name": processor.model_name, "description": "Modelo YOLOv8 para detección."}
+    return {"message": "Información del modelo no disponible."}
 
-@app.post("/model/config",
-    summary="Configurar modelo",
-    description="Actualiza la configuración del modelo de detección.")
-async def update_model_config(config: dict):
-    """Actualiza configuración del modelo"""
-    try:
-        if "min_confidence" in config:
-            processor.min_confidence = float(config["min_confidence"])
-        
-        # Aquí puedes agregar más configuraciones según necesites
-        # Por ejemplo, si implementas parámetros configurables en el processor
-        
-        return {
-            "message": "Configuración actualizada exitosamente",
-            "new_config": {
-                "min_confidence": processor.min_confidence,
-                **config
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error actualizando configuración: {str(e)}")
-
-@app.get("/model/test",
-    summary="Probar modelo",
-    description="Realiza una prueba del modelo con una imagen de ejemplo.")
-async def test_model():
-    """Prueba el modelo con datos de ejemplo"""
-    try:
-        # Podrías implementar una prueba con una imagen de ejemplo
-        test_results = {
-            "status": "ok",
-            "model_loaded": processor.model is not None,
-            "classes_available": len(processor.model.names),
-            "confidence_threshold": processor.min_confidence,
-            "test_timestamp": datetime.utcnow().isoformat()
-        }
-        return test_results
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en prueba del modelo: {str(e)}")
-
-# --- ENDPOINTS ADMINISTRATIVOS ---
-
-@app.post("/admin/load-seed-data")
-async def load_seed_data():
-    """Cargar datos desde detecciones.json"""
-    try:
-        from database import load_detections_from_json_to_db_async
-        count = await load_detections_from_json_to_db_async()
-        return {"status": "success", "message": f"Se cargaron {count} registros exitosamente"}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Archivo detecciones.json no encontrado")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al cargar datos: {str(e)}")
-
-@app.get("/model/evaluate")
-async def evaluate_model():
-    """Evalúa el rendimiento del modelo actual"""
-    try:
-        from utils.image_processing import processor
-        
-        # Obtener estadísticas básicas del modelo
-        model_stats = {
-            "model_type": "YOLOv8 NumerosCalados + Agrupación Mejorada",
-            "confidence_threshold": processor.min_confidence,
-            "agrupacion_activada": True,
-            "clases_soportadas": len(processor.model.names) if hasattr(processor.model, 'names') else 29,
-            "ultima_deteccion": processor.last_detection
-        }
-        
-        # Obtener estadísticas de la base de datos
-        db = get_database()
-        total_detections = await db.vagonetas.count_documents({})
-        
-        # Calcular métricas si hay detecciones recientes
-        if total_detections > 0:
-            # Obtener confianza promedio de las últimas 100 detecciones
-            pipeline = [
-                {"$match": {"confidence": {"$exists": True}}},
-                {"$sort": {"timestamp": -1}},
-                {"$limit": 100},
-                {"$group": {"_id": None, "avg_confidence": {"$avg": "$confidence"}}}
-            ]
-            avg_confidence_result = list(await db.vagonetas.aggregate(pipeline).to_list(length=1))
-            avg_confidence = avg_confidence_result[0]["avg_confidence"] if avg_confidence_result else 0
-            
-            model_stats.update({
-                "metricas_recientes": {
-                    "total_detecciones": total_detections,
-                    "confianza_promedio": round(avg_confidence, 3),
-                    "precision_estimada": "Pendiente implementar",
-                    "recall_estimado": "Pendiente implementar"
-                }
-            })
-        
-        return {"status": "success", "model_evaluation": model_stats}
-        
-    except Exception as e:
-        return {"status": "error", "message": f"Error evaluando modelo: {str(e)}"}
-
-@app.get("/model/config")
-async def get_model_config():
-    """Obtiene la configuración actual del modelo"""
-    try:
-        from utils.image_processing import processor
-        config = {
-            "confidence_threshold": processor.min_confidence,
-            "model_path": "backend/models/numeros_enteros/yolo_model/training/best.pt",
-            "agrupacion_enabled": True,
-            "umbral_agrupacion": 50,  # Default
-            "filtros_calidad": {
-                "min_area": 100,
-                "min_confidence": 0.3,
-                "aspect_ratio_range": [0.3, 3.0]
-            }
-        }
-        
-        return {"status": "success", "config": config}
-        
-    except Exception as e:
-        return {"status": "error", "message": f"Error obteniendo configuración: {str(e)}"}
-
-@app.put("/model/config")
-async def update_model_config(new_config: dict):
-    """Actualiza la configuración del modelo"""
-    try:
-        from utils.image_processing import processor
-        
-        if "confidence_threshold" in new_config:
-            new_threshold = float(new_config["confidence_threshold"])
-            if 0.1 <= new_threshold <= 1.0:
-                processor.min_confidence = new_threshold
-            else:
-                raise ValueError("confidence_threshold debe estar entre 0.1 y 1.0")
-        
-        return {"status": "success", "message": "Configuración actualizada", "new_config": new_config}
-        
-    except Exception as e:
-        return {"status": "error", "message": f"Error actualizando configuración: {str(e)}"}
-
-@app.post("/test/detection")
-async def test_detection_with_sample():
-    """Prueba la detección con imagen de muestra"""
-    try:
-        # Podrías implementar una prueba con una imagen de ejemplo
-        sample_image_path = r"c:\\Users\\NEVER\\OneDrive\\Documentos\\VSCode\\MisProyectos\\app_imagenes\\backend\\models\\numeros_enteros\\yolo_model\\dataset"
-        
-        # Buscar archivos de imagen en el directorio
-        import glob
-        image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp']
-        sample_files = []
-        
-        for ext in image_extensions:
-            sample_files.extend(glob.glob(os.path.join(sample_image_path, ext)))
-            sample_files.extend(glob.glob(os.path.join(sample_image_path, "**", ext), recursive=True))
-        
-        if not sample_files:
-            return {"status": "error", "message": "No se encontraron imágenes de muestra"}
-        
-        # Usar la primera imagen encontrada
-        test_image = sample_files[0]
-        
-        from utils.image_processing import detectar_vagoneta_y_placa_mejorado
-        
-        # Probar detección mejorada
-        # Actualizado para desempaquetar 5 valores
-        cropped_placa_img, bbox_vagoneta, bbox_placa, numero_detectado, confianza_placa = detectar_vagoneta_y_placa_mejorado(test_image)
-        
-        result = {
-            "status": "success",
-            "test_image": os.path.basename(test_image),
-            "numero_detectado": numero_detectado,
-            "confianza_placa": confianza_placa, # Añadido
-            "bbox_placa": bbox_placa.tolist() if bbox_placa is not None else None,
-            "bbox_vagoneta": bbox_vagoneta.tolist() if bbox_vagoneta is not None else None,
-            "deteccion_exitosa": numero_detectado is not None
-        }
-        
-        return result
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en prueba de detección: {str(e)}")
-
-@app.post("/debug/test-detection")
-async def debug_test_detection(file: UploadFile = File(...)):
-    """Endpoint de debug para probar detección en imagen específica"""
-    try:
-        # Guardar imagen temporal
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        temp_path = UPLOAD_DIR / f"debug_{timestamp}_{file.filename}"
-        
-        with temp_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        print(f"🔍 DEBUG: Procesando imagen {temp_path}")
-        
-        # Probar detección mejorada
-        numero_detectado_mejorado = None
-        bbox_vagoneta_mejorado = None
-        bbox_placa_mejorado = None
-        confianza_placa_mejorado = None # Añadido
-        try:
-            # Actualizado para desempaquetar 5 valores
-            cropped_placa_img_mejorado, bbox_vagoneta_mejorado, bbox_placa_mejorado, numero_detectado_mejorado, confianza_placa_mejorado = detectar_vagoneta_y_placa_mejorado(str(temp_path))
-            print(f"📊 DEBUG: Resultado detección mejorada: {numero_detectado_mejorado}, Confianza: {confianza_placa_mejorada}")
-        except Exception as e:
-            print(f"❌ DEBUG: Error en detección mejorada: {str(e)}")
-            # Asegurar que todas las variables tienen un valor asignado en caso de error
-            cropped_placa_img_mejorado = None 
-            # bbox_vagoneta_mejorado ya está inicializado a None
-            # bbox_placa_mejorado ya está inicializado a None
-            # numero_detectado_mejorado ya está inicializado a None
-            # confianza_placa_mejorado ya está inicializado a None
-        
-        # Probar detección estándar como respaldo
-        numero_estandar = None
-        confianza_placa_estandar = None # Añadido
-        bbox_vagoneta_std = None # Inicializar
-        bbox_placa_std = None    # Inicializar
-        try:
-            # Actualizado para desempaquetar 5 valores
-            cropped_placa_std, bbox_vagoneta_std, bbox_placa_std, numero_estandar, confianza_placa_estandar = detectar_vagoneta_y_placa(str(temp_path))
-            print(f"📊 DEBUG: Resultado detección estándar: {numero_estandar}, Confianza: {confianza_placa_estandar}")
-        except Exception as e:
-            print(f"❌ DEBUG: Error en detección estándar: {str(e)}")
-            # Asegurar que todas las variables tienen un valor asignado
-            cropped_placa_std = None
-            # bbox_vagoneta_std ya está inicializado a None
-            # bbox_placa_std ya está inicializado a None
-            # numero_estandar ya está inicializado a None
-            # confianza_placa_estandar ya está inicializado a None
-
-        # Limpiar archivo temporal
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-        
-        return {
-            "status": "debug_complete",
-            "filename": file.filename,
-            "deteccion_mejorada": {
-                "numero": numero_detectado_mejorado,
-                "confianza_placa": confianza_placa_mejorada, # Añadido
-                "bbox_vagoneta": bbox_vagoneta_mejorado.tolist() if bbox_vagoneta_mejorado is not None else None,
-                "bbox_placa": bbox_placa_mejorado.tolist() if bbox_placa_mejorado is not None else None
-            },
-            "deteccion_estandar": {
-                "numero": numero_estandar,
-                "confianza_placa": confianza_placa_estandar, # Añadido
-                "bbox_vagoneta": bbox_vagoneta_std.tolist() if bbox_vagoneta_std is not None else None, # Añadido para consistencia
-                "bbox_placa": bbox_placa_std.tolist() if bbox_placa_std is not None else None       # Añadido para consistencia
-            },
-            "model_info": {
-                "confidence_threshold": processor.min_confidence,
-                "model_classes": len(processor.model.names)
-            }
-        }
-        
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.post("/debug/test-sample-video")
-async def debug_test_sample_video():
-    """Prueba la detección con el video de muestra del dataset"""
-    try:
-        sample_video_path = r"c:\Users\NEVER\OneDrive\Documentos\VSCode\MisProyectos\app_imagenes\backend\models\numeros_enteros\yolo_model\dataset\CarroNenteros800.mp4"
-        
-        if not os.path.exists(sample_video_path):
-            return {"status": "error", "message": "Video de muestra no encontrado"}
-        
-        print(f"🎬 Probando video de muestra: {sample_video_path}")
-        
-        # Procesar video
-        numero_detectado = await procesar_video_mp4(sample_video_path)
-        
-        return {
-            "status": "test_complete",
-            "sample_video": "CarroNenteros800.mp4",
-            "numero_detectado": numero_detectado,
-            "model_config": {
-                "confidence_threshold": processor.min_confidence,
-                "model_path": "numeros_enteros/yolo_model/training/best.pt",
-                "classes_count": len(processor.model.names)
-            }
-        }
-        
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.post("/debug/adjust-confidence")
-async def debug_adjust_confidence(new_confidence: float):
-    """Ajusta dinámicamente el umbral de confianza del modelo"""
-    try:
-        if not (0.01 <= new_confidence <= 1.0):
-            return {"status": "error", "message": "La confianza debe estar entre 0.01 y 1.0"}
-        
-        old_confidence = processor.min_confidence
-        processor.min_confidence = new_confidence
-        
-        print(f"🔧 Confianza ajustada: {old_confidence} → {new_confidence}")
-        
-        return {
-            "status": "success",
-            "message": f"Confianza ajustada de {old_confidence} a {new_confidence}",
-            "old_confidence": old_confidence,
-            "new_confidence": new_confidence
-        }
-        
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
+# Añadir el bloque para ejecutar con 'python main.py'
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
+    # Usar string de importación para que el reload funcione correctamente
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
