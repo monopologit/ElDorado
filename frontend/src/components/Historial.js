@@ -18,9 +18,12 @@ const Historial = () => {
 
       // Usar las constantes importadas directamente
       const res = await axios.get(`${API_BASE_URL}${API_ENDPOINTS.vagonetas}`, { params }); 
+      console.log("Datos crudos de la API:", res.data); // Para depuración
       let data = res.data.map(item => ({
         ...item,
-        timestamp: new Date(item.timestamp), // Asegurarse de que el timestamp sea un objeto Date
+        // Asegurar que el timestamp se interprete como UTC añadiendo 'Z' si no está presente
+        timestamp: new Date(item.timestamp && !item.timestamp.endsWith('Z') ? item.timestamp + 'Z' : item.timestamp),
+        confianza: item.confianza // Asegurar que la propiedad se llame confianza consistentemente
       }));
       setRegistros(data);
     } catch (err) {
@@ -96,52 +99,32 @@ const Historial = () => {
                       <span className="px-2 py-1 bg-cyan-100 text-cyan-800 rounded text-xs font-semibold">
                         {r.modelo_ladrillo}
                       </span>
-                    ) : "-"}
+                    ) : <>{"-"}</>}
+                  </td>
+                  <td className="px-4 py-2 border-b">{r.merma !== null && r.merma !== undefined ? `${r.merma}%` : "-"}</td>
+                  <td className="px-4 py-2 border-b">
+                    {r.confianza !== null && r.confianza !== undefined ? r.confianza.toFixed(4) : "-"}
+                  </td>
+                  <td className="px-4 py-2 border-b">{r.origen_deteccion || "-"}</td>
+                  <td className="px-4 py-2 border-b">
+                    {r.timestamp instanceof Date ? r.timestamp.toLocaleString("es-CL", {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                      hour12: false
+                    }) : String(r.timestamp)}
                   </td>
                   <td className="px-4 py-2 border-b">
-                    {r.merma !== undefined && r.merma !== null ? (
-                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                        r.merma > 5 ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {r.merma}%
-                      </span>
-                    ) : "-"}
-                  </td>
-                  <td className="px-4 py-2 border-b">
-                    {r.confidence ? (
-                      <div className="flex items-center gap-1">
-                        <div className={`w-2 h-2 rounded-full ${
-                          r.confidence > 0.8 ? 'bg-green-500' : 
-                          r.confidence > 0.6 ? 'bg-yellow-500' : 'bg-red-500'
-                        }`}></div>
-                        <span className="text-xs font-mono">
-                          {Math.round(r.confidence * 100)}%
-                        </span>
-                      </div>
-                    ) : "-"}
-                  </td>
-                  <td className="px-4 py-2 border-b">
-                    {r.auto_captured ? (
-                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
-                        🤖 Auto
-                      </span>
+                    {r.imagen_path ? (
+                      <a href={`${API_BASE_URL}/${r.imagen_path}`} target="_blank" rel="noopener noreferrer" className="text-cyan-600 hover:underline">
+                        Ver Video
+                      </a>
                     ) : (
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">
-                        👤 Manual
-                      </span>
+                      <span className="text-gray-500">Sin video</span>
                     )}
-                  </td>
-                  <td className="px-4 py-2 border-b text-xs">
-                    {new Date(r.timestamp).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-2 border-b">
-                    <img 
-                      src={`http://localhost:8000/${r.imagen_path}`} 
-                      alt="vagoneta" 
-                      width={80} 
-                      className="rounded shadow border border-cyan-100 hover:scale-110 transition-transform cursor-pointer" 
-                      onClick={() => window.open(`http://localhost:8000/${r.imagen_path}`, '_blank')}
-                    />
                   </td>
                 </tr>
               ))}
