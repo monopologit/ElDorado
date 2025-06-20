@@ -1,8 +1,9 @@
 from database import get_database
 from schemas import VagonetaCreate
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Dict, Any, Tuple
 from bson import ObjectId
+from pymongo.database import Database
 
 # Funciones CRUD optimizadas
 
@@ -46,6 +47,46 @@ def get_vagonetas_historial(
     cursor = db.vagonetas.find(query).sort("timestamp", -1).skip(skip).limit(limit)
     return list(cursor)
 
+def get_vagonetas_historial_with_filters(
+    db: Database, # Type hint for clarity
+    skip: int = 0, 
+    limit: int = 100,
+    sort_by: Optional[str] = "timestamp",
+    sort_order: Optional[int] = -1,
+    filtro: Optional[str] = None,
+    fecha_inicio: Optional[datetime] = None,
+    fecha_fin: Optional[datetime] = None
+) -> Tuple[List[Dict[str, Any]], int]:
+    query: Dict[str, Any] = {}
+
+    if filtro:
+        # Case-insensitive regex search across multiple fields
+        regex_query = {"$regex": filtro, "$options": "i"}
+        query["$or"] = [
+            {"numero": regex_query},
+            {"evento": regex_query},
+            {"tunel": regex_query},
+            {"modelo_ladrillo": regex_query}
+        ]
+
+    if fecha_inicio and fecha_fin:
+        query["timestamp"] = {"$gte": fecha_inicio, "$lte": fecha_fin}
+    elif fecha_inicio:
+        query["timestamp"] = {"$gte": fecha_inicio}
+    elif fecha_fin:
+        query["timestamp"] = {"$lte": fecha_fin}
+
+    # Get total count before pagination
+    total_registros = db.vagonetas.count_documents(query)
+
+    # Get paginated and sorted results
+    cursor = db.vagonetas.find(query).sort(sort_by, sort_order).skip(skip).limit(limit)
+    
+    # This part must be synchronous as per pymongo documentation
+    registros = [doc for doc in cursor]
+    
+    return registros, total_registros
+
 def get_trayectoria_completa(numero: str) -> List[Dict[str, Any]]:
     db = get_database()
     return list(db.vagonetas.find({"numero": numero, "estado": "activo"}).sort("timestamp", 1))
@@ -70,10 +111,9 @@ def get_estadisticas_vagoneta(numero: str) -> Dict[str, Any]:
 def anular_registro(id: str) -> bool:
     db = get_database()
     result = db.vagonetas.update_one(
-        {"_id": ObjectId(id)},
-        {"$set": {
+        {"_id": ObjectId(id)},        {"$set": {
             "estado": "anulado",
-            "anulado_en": datetime.utcnow()
+            "anulado_en": datetime.now(timezone.utc)
         }}
     )
     return result.modified_count > 0
@@ -108,18 +148,18 @@ def actualizar_registro(
     )
     return result.modified_count > 0
 
-async def get_vagonetas_historial_count(
-    db: Any, # Should be AsyncIOMotorDatabase, but using Any for broader compatibility if get_database() changes
+def get_vagonetas_historial_count(
     filtro: Optional[str] = None,
     fecha_inicio: Optional[datetime] = None,
     fecha_fin: Optional[datetime] = None
 ) -> int:
-    query: Dict[str, Any] = {}
+    db = get_database()  # Get database synchronously like other functions
+    query: Dict[str, Any] = {"estado": "activo"}  # Match the query used in get_vagonetas_historial
+    
     if filtro:
-        # Assuming 'filtro' searches in 'numero_detectado' or other relevant text fields
-        # This might need to be adjusted based on how 'filtro' is intended to work (e.g., regex, specific fields)
+        # Search in numero field to match existing data structure
         query["$or"] = [
-            {"numero_detectado": {"$regex": filtro, "$options": "i"}},
+            {"numero": {"$regex": filtro, "$options": "i"}},
             {"evento": {"$regex": filtro, "$options": "i"}},
             {"tunel": {"$regex": filtro, "$options": "i"}}
         ]
@@ -130,9 +170,6 @@ async def get_vagonetas_historial_count(
         query["timestamp"] = {"$gte": fecha_inicio}
     elif fecha_fin:
         query["timestamp"] = {"$lte": fecha_fin}
-    
-    # Add any other fixed query parameters if necessary, e.g., {"estado": "activo"}
-    # query["estado"] = "activo" # Uncomment if you only want active records
 
-    count = await db.vagonetas.count_documents(query)
+    count = db.vagonetas.count_documents(query)  # Synchronous call
     return count
